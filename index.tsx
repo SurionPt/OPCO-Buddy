@@ -696,7 +696,34 @@ const App = () => {
                     </div>
                   )}
 
-                  {msg.generatedFiles && msg.generatedFiles.length > 0 && (<div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-4">{msg.generatedFiles.map((f, i) => f.type === 'image' ? (<div key={i} className="col-span-full group relative overflow-hidden rounded-2xl border border-slate-200 shadow-xl bg-white p-2"><img src={f.url} alt="Infográfico" className="w-full h-auto rounded-xl" /><a href={f.url} download={f.name} className="absolute bottom-4 right-4 bg-white/95 p-4 rounded-full shadow-2xl text-[#ca0607] hover:scale-110 transition-transform"><Download size={22} /></a></div>) : (<a key={i} href={f.url} download={f.name} className="flex items-center gap-4 p-5 bg-white border border-slate-200 rounded-2xl hover:border-[#ca0607] hover:shadow-lg transition-all group relative overflow-hidden"><div className="p-3 bg-slate-50 rounded-xl text-[#ca0607]">{f.type === 'pptx' && <Presentation size={24}/>}{f.type === 'docx' && <FileTextIcon size={24}/>}{f.type === 'pdf' && <FileJson size={24}/>}{f.type === 'xlsx' && <FileSpreadsheet size={24}/>}</div><div className="flex-1 truncate"><div className="text-[9px] font-black text-slate-400 uppercase mb-1">PRO EXPORT</div><div className="text-xs font-bold truncate text-slate-800">{f.name}</div></div><Download size={18} className="text-[#ca0607] group-hover:scale-125 transition-transform"/></a>)))}</div>)}
+                  {msg.generatedFiles && msg.generatedFiles.length > 0 && (
+  <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-4">
+    {msg.generatedFiles.map((f, i) => 
+      f.type === 'image' ? (
+        <div key={i} className="col-span-full group relative overflow-hidden rounded-2xl border border-slate-200 shadow-xl bg-white p-2">
+          <img src={f.url} alt="Infográfico" className="w-full h-auto rounded-xl" />
+          <a href={f.url} download={f.name} className="absolute bottom-4 right-4 bg-white/95 p-4 rounded-full shadow-2xl text-[#ca0607] hover:scale-110 transition-transform">
+            <Download size={22} />
+          </a>
+        </div>
+      ) : (
+        <a key={i} href={f.url} download={f.name} className="flex items-center gap-4 p-5 bg-white border border-slate-200 rounded-2xl hover:border-[#ca0607] hover:shadow-lg transition-all group relative overflow-hidden">
+          <div className="p-3 bg-slate-50 rounded-xl text-[#ca0607]">
+            {f.type === 'pptx' && <Presentation size={24}/>}
+            {f.type === 'docx' && <FileTextIcon size={24}/>}
+            {f.type === 'pdf' && <FileJson size={24}/>}
+            {f.type === 'xlsx' && <FileSpreadsheet size={24}/>}
+          </div>
+          <div className="flex-1 truncate">
+            <div className="text-[9px] font-black text-slate-400 uppercase mb-1">PRO EXPORT</div>
+            <div className="text-xs font-bold truncate text-slate-800">{f.name}</div>
+          </div>
+          <Download size={18} className="text-[#ca0607] group-hover:scale-125 transition-transform"/>
+        </a>
+      )
+    )}
+  </div>
+)}
                 </div>
               </div>
             </div>
