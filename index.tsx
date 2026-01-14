@@ -1,6 +1,7 @@
-import React, { useState, useRef, useEffect } from 'react';
+
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { createRoot } from 'react-dom/client';
-import { GoogleGenAI, Type, GenerateContentResponse } from '@google/genai';
+import { GoogleGenAI, Type, GenerateContentResponse, FunctionDeclaration, Modality } from '@google/genai';
 import { 
   Send, 
   FileUp, 
@@ -21,18 +22,57 @@ import {
   X,
   MapPin,
   Phone,
-  Mail
+  Mail,
+  Download,
+  ChevronDown,
+  Globe,
+  AlertCircle,
+  FileCode,
+  Search,
+  Menu,
+  UploadCloud,
+  ImageIcon,
+  FileDown,
+  Sparkles,
+  Film,
+  Settings,
+  Image as ImageIconAlt,
+  Wand2,
+  FileBadge
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import * as mammoth from 'mammoth';
 import * as XLSX from 'xlsx';
 import JSZip from 'jszip';
+import { jsPDF } from 'jspdf';
+import * as docx from 'docx';
+import PptxGenJS from 'pptxgenjs';
 
-// Configuração do PDF.js
-// @ts-ignore
-pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
+// --- Utility Functions ---
+const blobToBase64 = (blob: Blob): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const base64String = (reader.result as string).split(',')[1];
+      resolve(base64String);
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+};
 
+// --- Models & Config ---
 const OPCO_LOGO_URL = 'https://raw.githubusercontent.com/SurionPt/OCPCO/refs/heads/main/esfera%2050x47.png';
+const NEURAL_BG_URL = 'https://raw.githubusercontent.com/SurionPt/OCPCO/refs/heads/main/neural.jpg';
+const STORAGE_KEY = 'opco_buddy_chats_v3';
+
+interface MediaAsset {
+  id: string;
+  url: string;
+  type: 'image' | 'video';
+  mimeType: string;
+  base64?: string;
+}
 
 interface Document {
   id: string;
@@ -46,7 +86,11 @@ interface Message {
   id: string;
   role: 'user' | 'assistant';
   content: string;
-  timestamp: string; // ISO string for storage
+  timestamp: string;
+  generatedFiles?: any[];
+  imageUrls?: string[];
+  videoUrl?: string;
+  attachedMedia?: MediaAsset[];
 }
 
 interface Chat {
@@ -56,559 +100,462 @@ interface Chat {
   createdAt: string;
 }
 
-const STORAGE_KEY = 'opco_buddy_chats';
+// --- Function Declarations ---
+const createTrainingDocTool: FunctionDeclaration = {
+  name: 'create_training_document',
+  parameters: {
+    type: Type.OBJECT,
+    description: 'Cria um documento profissional estruturado para formação ou apresentação corporativa.',
+    properties: {
+      title: { type: Type.STRING, description: 'Título da formação' },
+      modules: {
+        type: Type.ARRAY,
+        items: {
+          type: Type.OBJECT,
+          properties: {
+            name: { type: Type.STRING, description: 'Nome do módulo' },
+            objectives: { type: Type.ARRAY, items: { type: Type.STRING } },
+            content: { type: Type.STRING, description: 'Conteúdo detalhado do módulo' }
+          }
+        }
+      }
+    },
+    required: ['title', 'modules']
+  }
+};
 
 const App = () => {
   const [chats, setChats] = useState<Chat[]>([]);
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
   const [input, setInput] = useState('');
   const [documents, setDocuments] = useState<Document[]>([]);
+  const [attachedMedia, setAttachedMedia] = useState<MediaAsset[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
-  
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [statusMsg, setStatusMsg] = useState('');
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const mediaInputRef = useRef<HTMLInputElement>(null);
+  const docInputRef = useRef<HTMLInputElement>(null);
 
-  // Load chats from localStorage on mount
+  // --- Derived State ---
+  const activeChat = useMemo(() => chats.find(c => c.id === activeChatId), [chats, activeChatId]);
+
+  // --- Initial Setup ---
   useEffect(() => {
     const saved = localStorage.getItem(STORAGE_KEY);
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
         setChats(parsed);
-        if (parsed.length > 0) {
-          setActiveChatId(parsed[0].id);
-        } else {
-          createNewChat();
-        }
-      } catch (e) {
-        console.error("Erro ao carregar histórico:", e);
-        createNewChat();
-      }
-    } else {
-      createNewChat();
-    }
+        if (parsed.length > 0) setActiveChatId(parsed[0].id);
+      } catch (e) { createNewChat(); }
+    } else createNewChat();
   }, []);
 
-  // Save chats to localStorage whenever they change
   useEffect(() => {
-    if (chats.length > 0) {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(chats));
-    }
+    if (chats.length > 0) localStorage.setItem(STORAGE_KEY, JSON.stringify(chats));
   }, [chats]);
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
-
   useEffect(() => {
-    scrollToBottom();
-  }, [chats, activeChatId, isTyping]);
-
-  const activeChat = chats.find(c => c.id === activeChatId) || null;
-  const messages = activeChat ? activeChat.messages : [];
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [chats, isTyping]);
 
   const createNewChat = () => {
+    const id = Date.now().toString();
     const newChat: Chat = {
-      id: Date.now().toString(),
-      title: 'Nova Conversa',
-      messages: [
-        {
-          id: '1',
-          role: 'assistant',
-          content: 'Bem-vindo à **OPCO**. Sou o **OPCO Buddy**, o seu Assistente de Conhecimento Inteligente. \n\nA minha função é analisar de forma **abrangente e detalhada** qualquer documento que carregue, fornecendo respostas baseadas inteiramente na sua base de dados pessoal ou empresarial. \n\nCarregue os seus ficheiros e pergunte-me o que desejar em qualquer idioma.',
-          timestamp: new Date().toISOString(),
-        }
-      ],
+      id,
+      title: "Nova Consulta OPCO",
+      messages: [{ id: '1', role: 'assistant', content: "Bem-vindo ao OPCO Buddy. Sou o seu assistente inteligente. Carregue documentos para análise ou peça-me para criar manuais e imagens corporativas.", timestamp: new Date().toISOString() }],
       createdAt: new Date().toISOString()
     };
     setChats(prev => [newChat, ...prev]);
-    setActiveChatId(newChat.id);
+    setActiveChatId(id);
   };
 
-  const deleteChat = (id: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    const filtered = chats.filter(c => c.id !== id);
-    setChats(filtered);
-    if (activeChatId === id) {
-      if (filtered.length > 0) {
-        setActiveChatId(filtered[0].id);
-      } else {
-        createNewChat();
-      }
+  // --- File Processing ---
+  // @ts-ignore
+  const pdfjsLib = window['pdfjs-dist/build/pdf'] || window.pdfjsLib;
+
+  const processFile = async (file: File): Promise<string> => {
+    const ext = file.name.split('.').pop()?.toLowerCase();
+    const buffer = await file.arrayBuffer();
+    switch (ext) {
+      case 'pdf':
+        try {
+          const pdf = await pdfjsLib.getDocument({ data: buffer }).promise;
+          let fullText = '';
+          for (let i = 1; i <= pdf.numPages; i++) {
+            const page = await pdf.getPage(i);
+            const textContent = await page.getTextContent();
+            fullText += textContent.items.map((item: any) => item.str).join(' ') + '\n';
+          }
+          return fullText;
+        } catch (e) { return "Erro ao ler PDF."; }
+      case 'docx':
+        try {
+          const result = await mammoth.extractRawText({ arrayBuffer: buffer });
+          return result.value;
+        } catch (e) { return "Erro ao ler DOCX."; }
+      case 'xlsx':
+      case 'xls':
+        try {
+          const wb = XLSX.read(buffer, { type: 'array' });
+          return wb.SheetNames.map(n => `Sheet: ${n}\n${XLSX.utils.sheet_to_txt(wb.Sheets[n])}`).join('\n');
+        } catch (e) { return "Erro ao ler Excel."; }
+      default:
+        return await file.text();
     }
-  };
-
-  const extractTextFromPDF = async (data: ArrayBuffer): Promise<string> => {
-    // @ts-ignore
-    const pdf = await pdfjsLib.getDocument({ data }).promise;
-    let fullText = '';
-    for (let i = 1; i <= pdf.numPages; i++) {
-      const page = await pdf.getPage(i);
-      const textContent = await page.getTextContent();
-      fullText += textContent.items.map((item: any) => item.str).join(' ') + '\n';
-    }
-    return fullText;
-  };
-
-  const extractTextFromDOCX = async (data: ArrayBuffer): Promise<string> => {
-    const result = await mammoth.extractRawText({ arrayBuffer: data });
-    return result.value;
-  };
-
-  const extractTextFromXLSX = async (data: ArrayBuffer): Promise<string> => {
-    const workbook = XLSX.read(data, { type: 'array' });
-    let fullText = '';
-    workbook.SheetNames.forEach(sheetName => {
-      const worksheet = workbook.Sheets[sheetName];
-      fullText += `--- Folha: ${sheetName} ---\n`;
-      fullText += XLSX.utils.sheet_to_txt(worksheet) + '\n';
-    });
-    return fullText;
-  };
-
-  const extractTextFromPPTX = async (data: ArrayBuffer): Promise<string> => {
-    const zip = await JSZip.loadAsync(data);
-    let fullText = '';
-    const slideEntries = Object.keys(zip.files).filter(name => name.startsWith('ppt/slides/slide') && name.endsWith('.xml'));
-    
-    slideEntries.sort((a, b) => {
-      const numA = parseInt(a.match(/\d+/)?.[0] || '0');
-      const numB = parseInt(b.match(/\d+/)?.[0] || '0');
-      return numA - numB;
-    });
-
-    for (const slidePath of slideEntries) {
-      const content = await zip.file(slidePath)?.async('text');
-      if (content) {
-        const slideNum = slidePath.match(/\d+/)?.[0];
-        fullText += `--- Slide ${slideNum} ---\n`;
-        const parser = new DOMParser();
-        const xmlDoc = parser.parseFromString(content, "text/xml");
-        const textNodes = xmlDoc.getElementsByTagName("a:t");
-        for (let i = 0; i < textNodes.length; i++) {
-          fullText += (textNodes[i].textContent || '') + ' ';
-        }
-        fullText += '\n';
-      }
-    }
-    return fullText;
   };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
-    if (!files) return;
-
+    if (!files?.length) return;
     setIsUploading(true);
-    for (const file of Array.from(files)) {
-      try {
-        let content = '';
-        const extension = file.name.split('.').pop()?.toLowerCase();
-        const buffer = await file.arrayBuffer();
-
-        if (extension === 'pdf') {
-          content = await extractTextFromPDF(buffer);
-        } else if (extension === 'docx') {
-          content = await extractTextFromDOCX(buffer);
-        } else if (extension === 'xlsx' || extension === 'xls') {
-          content = await extractTextFromXLSX(buffer);
-        } else if (extension === 'pptx') {
-          content = await extractTextFromPPTX(buffer);
-        } else if (['txt', 'md', 'csv', 'json', 'xml'].includes(extension || '')) {
-          content = await file.text();
-        } else {
-          try {
-            content = await file.text();
-          } catch {
-            content = "[Ficheiro binário não suportado]";
-          }
-        }
-
-        if (content.trim()) {
-          const newDoc: Document = {
-            id: Math.random().toString(36).substr(2, 9),
-            name: file.name,
-            content: content,
-            size: (file.size / 1024).toFixed(1) + ' KB',
-            type: extension || 'file'
-          };
-          setDocuments(prev => [...prev, newDoc]);
-        }
-      } catch (error) {
-        console.error(`Erro ao processar ficheiro ${file.name}:`, error);
-      }
+    const filesArray = Array.from(files) as File[];
+    for (const f of filesArray) {
+      const content = await processFile(f);
+      setDocuments(prev => [...prev, {
+        id: Math.random().toString(36).substr(2, 9),
+        name: f.name,
+        content,
+        size: `${(f.size / 1024).toFixed(1)} KB`,
+        type: f.name.split('.').pop() || 'file'
+      }]);
     }
     setIsUploading(false);
-    if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
-  const removeDocument = (id: string) => {
-    setDocuments(prev => prev.filter(doc => doc.id !== id));
-  };
-
-  const getDocIcon = (type: string) => {
-    switch (type) {
-      case 'xlsx': case 'xls': case 'csv': return <Table size={16} />;
-      case 'pptx': case 'ppt': return <Presentation size={16} />;
-      default: return <FileText size={16} />;
+  // --- Media Handlers ---
+  const handleMediaUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files) return;
+    const filesArray = Array.from(files) as File[];
+    for (const file of filesArray) {
+      const base64 = await blobToBase64(file);
+      const url = URL.createObjectURL(file);
+      setAttachedMedia(prev => [...prev, {
+        id: Math.random().toString(36).substr(2, 9),
+        url,
+        type: file.type.startsWith('video') ? 'video' : 'image',
+        mimeType: file.type,
+        base64
+      }]);
     }
   };
 
+  // --- AI Logic ---
   const handleSendMessage = async (e?: React.FormEvent) => {
     e?.preventDefault();
-    if (!input.trim() || isTyping || !activeChatId) return;
+    if ((!input.trim() && attachedMedia.length === 0) || isTyping || !activeChatId) return;
 
     const userMessage: Message = {
       id: Date.now().toString(),
       role: 'user',
       content: input,
-      timestamp: new Date().toISOString(),
+      attachedMedia: [...attachedMedia],
+      timestamp: new Date().toISOString()
     };
 
-    const currentInput = input;
-    const assistantMsgId = (Date.now() + 1).toString();
+    setChats(prev => prev.map(chat => chat.id === activeChatId ? { ...chat, messages: [...chat.messages, userMessage] } : chat));
     setInput('');
+    setAttachedMedia([]);
     setIsTyping(true);
-
-    // Adiciona a mensagem do utilizador e um placeholder para a resposta do assistente
-    setChats(prev => prev.map(chat => {
-      if (chat.id === activeChatId) {
-        const isFirstUserMessage = chat.messages.filter(m => m.role === 'user').length === 0;
-        return {
-          ...chat,
-          title: isFirstUserMessage ? currentInput.substring(0, 30) + (currentInput.length > 30 ? '...' : '') : chat.title,
-          messages: [...chat.messages, userMessage, {
-            id: assistantMsgId,
-            role: 'assistant',
-            content: '',
-            timestamp: new Date().toISOString()
-          }]
-        };
-      }
-      return chat;
-    }));
 
     try {
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-      
-      const context = documents.length > 0 
-        ? `Você tem acesso à seguinte base de conhecimento extraída dos documentos carregados pelo utilizador:\n${documents.map(d => `--- INÍCIO DO DOCUMENTO: ${d.name} ---\n${d.content}\n--- FIM DO DOCUMENTO: ${d.name} ---`).join('\n\n')}\n\nInstrução Importante: Utilize as informações acima de forma abrangente para responder à questão. Não se limite a uma área técnica se o conteúdo dos documentos for de outro domínio.`
-        : "O utilizador não carregou documentos de contexto. Responda como um assistente inteligente e prestativo da OPCO.";
+      const currentInput = userMessage.content;
+      const media = userMessage.attachedMedia || [];
+      const hasImage = media.some(m => m.type === 'image');
 
-      const responseStream = await ai.models.generateContentStream({
-        model: 'gemini-3-flash-preview', 
-        contents: [
-          {
-            parts: [{
-              text: `${context}\n\nPergunta do utilizador: ${currentInput}`
-            }]
+      // Note: Video Generation (Veo) removed as it requires Paid API per instructions.
+      if (/(video|anima|filme|movimento)/gi.test(currentInput) && hasImage) {
+         addAssistantMessage("As funcionalidades de geração de vídeo requerem uma subscrição profissional. Posso ajudá-lo com análise de documentos ou geração de imagens.");
+         setIsTyping(false);
+         return;
+      }
+
+      // 1. Edição de Imagem ou Geração com Flash (Grátis)
+      if (/(edita|altera|muda|filtro|remove|adiciona|gera|cria|imagem|foto|logo)/gi.test(currentInput)) {
+        setStatusMsg("A processar imagem...");
+        const response = await ai.models.generateContent({
+          model: 'gemini-2.5-flash-image',
+          contents: {
+            parts: [
+              ...(hasImage ? [{ inlineData: { data: media.find(m => m.type === 'image')!.base64!, mimeType: media.find(m => m.type === 'image')!.mimeType } }] : []),
+              { text: `${currentInput}. Estilo corporativo para a empresa OPCO.` }
+            ]
           }
-        ],
+        });
+
+        let imageUrls: string[] = [];
+        for (const part of response.candidates[0].content.parts) {
+          if (part.inlineData) imageUrls.push(`data:${part.inlineData.mimeType};base64,${part.inlineData.data}`);
+        }
+        
+        if (imageUrls.length > 0) {
+          addAssistantMessage("Aqui está o resultado processado:", { imageUrls });
+        } else {
+          addAssistantMessage(response.text || "Processamento concluído.");
+        }
+        setStatusMsg('');
+        return;
+      }
+
+      // 2. Chat Normal / RAG / Docs de Formação com Flash
+      const context = documents.length > 0 ? "Documentos Base OPCO:\n" + documents.map(d => d.content).join('\n') : "";
+      const response = await ai.models.generateContent({
+        model: 'gemini-3-flash-preview',
+        contents: `${context}\n\nUtilizador: ${currentInput}`,
         config: {
-          systemInstruction: "Você é o OPCO Buddy, o Assistente Digital da OPCO (https://opco.pt/). A sua função principal é processar e explicar de forma abrangente e imparcial qualquer informação presente nos documentos fornecidos pelo utilizador. Não force respostas direcionadas a Lean Management ou Consultoria se o tema do documento for diferente. Adapte-se totalmente ao contexto dos ficheiros. O seu tom deve ser profissional, claro e rigoroso. Use o Português de Portugal como língua preferencial, mas responda noutros idiomas se solicitado.",
-          temperature: 0.7,
+          systemInstruction: "És o OPCO Buddy. Especialista em consultoria digital e formação. Responde com base nos documentos carregados.",
+          tools: [{ functionDeclarations: [createTrainingDocTool] }]
         }
       });
 
-      let fullContent = '';
-      for await (const chunk of responseStream) {
-        const chunkText = chunk.text || "";
-        fullContent += chunkText;
-        
-        // Atualiza a interface com cada pedaço de texto recebido (streaming)
-        setChats(prev => prev.map(chat => {
-          if (chat.id === activeChatId) {
-            return {
-              ...chat,
-              messages: chat.messages.map(m => 
-                m.id === assistantMsgId ? { ...m, content: fullContent } : m
-              )
-            };
+      let content = response.text || "";
+      let files: any[] = [];
+
+      if (response.functionCalls) {
+        for (const fc of response.functionCalls) {
+          if (fc.name === 'create_training_document') {
+            const file = await generateTrainingPDF(fc.args);
+            files.push(file);
+            content += "\n\n**Manual de Formação OPCO gerado com sucesso.**";
           }
-          return chat;
-        }));
+        }
       }
 
-    } catch (error) {
-      console.error('Erro na API:', error);
-      const errorMessage = 'Ocorreu um erro técnico na comunicação com os sistemas OPCO. Por favor, tente novamente.';
-      setChats(prev => prev.map(chat => {
-        if (chat.id === activeChatId) {
-          return {
-            ...chat,
-            messages: chat.messages.map(m => 
-              m.id === assistantMsgId ? { ...m, content: errorMessage } : m
-            )
-          };
-        }
-        return chat;
-      }));
+      addAssistantMessage(content, { generatedFiles: files });
+
+    } catch (error: any) {
+      addAssistantMessage("Ocorreu um erro técnico. Por favor, tente novamente.");
     } finally {
       setIsTyping(false);
+      setStatusMsg('');
     }
   };
 
-  return (
-    <div className="flex flex-col md:flex-row h-screen bg-[#f8f9fa] overflow-hidden">
-      {/* Sidebar - Knowledge Base & History */}
-      <aside className="w-full md:w-80 bg-black border-r border-slate-800 flex flex-col shrink-0 relative overflow-hidden">
-        {/* Subtil Neural Background Pattern */}
-        <div className="absolute inset-0 pointer-events-none opacity-[0.08]" style={{ 
-          backgroundImage: `url("data:image/svg+xml,%3Csvg width='120' height='120' viewBox='0 0 100 100' xmlns='http://www.w3.org/2000/svg'%3E%3Cg stroke='%23ca0607' stroke-width='0.4' fill='none'%3E%3Cpath d='M10 10 L30 40 L60 20 L90 50'/%3E%3Cpath d='M30 40 L10 80'/%3E%3Cpath d='M60 20 L80 80'/%3E%3Cpath d='M90 50 L40 90 L10 10'/%3E%3Ccircle cx='10' cy='10' r='1' fill='%23ca0607'/%3E%3Ccircle cx='30' cy='40' r='1' fill='%23ca0607'/%3E%3Ccircle cx='60' cy='20' r='1' fill='%23ca0607'/%3E%3Ccircle cx='90' cy='50' r='1' fill='%23ca0607'/%3E%3Ccircle cx='10' cy='80' r='1' fill='%23ca0607'/%3E%3Ccircle cx='80' cy='80' r='1' fill='%23ca0607'/%3E%3Ccircle cx='40' cy='90' r='1' fill='%23ca0607'/%3E%3C/g%3E%3C/svg%3E")`,
-          backgroundSize: '180px 180px'
-        }}></div>
+  const addAssistantMessage = (content: string, extra = {}) => {
+    const msg: Message = {
+      id: Date.now().toString(),
+      role: 'assistant',
+      content,
+      timestamp: new Date().toISOString(),
+      ...extra
+    };
+    setChats(prev => prev.map(chat => chat.id === activeChatId ? { ...chat, messages: [...chat.messages, msg] } : chat));
+  };
 
+  const generateTrainingPDF = async (args: any) => {
+    const doc = new jsPDF();
+    doc.setFillColor(202, 6, 7);
+    doc.rect(0, 0, 210, 40, 'F');
+    doc.setTextColor(255);
+    doc.setFontSize(22);
+    doc.text("MANUAL DE FORMAÇÃO OPCO", 15, 25);
+    
+    doc.setTextColor(0);
+    doc.setFontSize(16);
+    doc.text(args.title, 15, 55);
+    
+    let y = 70;
+    args.modules.forEach((mod: any) => {
+      if (y > 250) { doc.addPage(); y = 20; }
+      doc.setFontSize(14);
+      doc.setTextColor(202, 6, 7);
+      doc.text(mod.name, 15, y);
+      y += 10;
+      doc.setFontSize(10);
+      doc.setTextColor(50);
+      const lines = doc.splitTextToSize(mod.content, 180);
+      doc.text(lines, 15, y);
+      y += (lines.length * 6) + 10;
+    });
+
+    const blob = doc.output('blob');
+    return { name: `Formacao-${args.title}.pdf`, url: URL.createObjectURL(blob), type: 'pdf' };
+  };
+
+  return (
+    <div className="flex h-[100dvh] bg-slate-50 overflow-hidden font-inter">
+      {/* Sidebar */}
+      <aside className={`fixed inset-y-0 left-0 z-50 w-72 bg-[#111218] border-r border-slate-800/50 flex flex-col transition-transform duration-300 md:relative md:translate-x-0 ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
+        <div className="absolute inset-0 opacity-5 pointer-events-none" style={{ backgroundImage: `url("${NEURAL_BG_URL}")`, backgroundSize: 'cover' }}></div>
         <div className="relative z-10 flex flex-col h-full">
-          <div className="p-6 border-b border-slate-800 flex items-center justify-between">
-            <div className="flex items-center gap-2 text-white font-bold text-xl tracking-tighter">
-              <div className="w-10 h-10 flex items-center justify-center">
-                <img src={OPCO_LOGO_URL} alt="OPCO Logo" className="w-full h-full object-contain" />
-              </div>
-              <div className="flex flex-col">
-                <span className="text-white text-lg"><span className="text-[#ca0607]">OPCO</span> Buddy</span>
-              </div>
+          <div className="p-6 flex items-center justify-between border-b border-white/5">
+            <div className="flex items-center gap-2 text-white font-bold text-lg hover:opacity-80 transition-opacity cursor-pointer" onClick={() => window.location.reload()}>
+              <img src={OPCO_LOGO_URL} className="w-7 h-7" /> <span>OPCO Buddy</span>
             </div>
-            <a href="https://opco.pt" target="_blank" rel="noopener noreferrer" className="text-white/40 hover:text-[#ca0607] transition-colors">
-              <ExternalLink size={20} />
-            </a>
+            <button onClick={() => setIsSidebarOpen(false)} className="md:hidden text-white/40"><X size={20}/></button>
           </div>
 
-          <div className="flex-1 overflow-y-auto p-4 custom-scrollbar flex flex-col gap-8">
-            {/* New Chat Button */}
-            <button 
-              onClick={createNewChat}
-              className="flex items-center gap-3 w-full p-3 bg-white/5 border border-white/10 rounded-xl text-white hover:bg-white/10 transition-all text-sm font-semibold shadow-sm"
-            >
-              <PlusCircle size={18} className="text-[#ca0607]" />
-              <span>Nova Conversa</span>
+          <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-5 custom-scrollbar">
+            <button onClick={createNewChat} className="flex items-center gap-3 p-3 bg-white/5 border border-white/10 rounded-xl text-white text-xs font-semibold hover:bg-white/10 transition-all">
+              <PlusCircle size={16} className="text-[#ca0607]" /> Nova Consulta
             </button>
 
-            {/* Conversations History */}
-            <section>
-              <div className="flex items-center gap-2 mb-4 text-slate-500 font-bold text-[10px] uppercase tracking-[0.2em]">
-                <MessageCircle size={14} className="text-[#ca0607]" />
-                <span>Conversas Recentes</span>
+            <div className="space-y-3">
+              <div className="text-[10px] text-slate-500 font-bold uppercase tracking-widest px-1">Conhecimento Carregado</div>
+              <div className="space-y-1">
+                {documents.length === 0 ? (
+                  <div className="p-3 text-[10px] text-slate-600 italic">Nenhum documento carregado</div>
+                ) : (
+                  documents.map(doc => (
+                    <div key={doc.id} className="p-2.5 bg-white/5 rounded-lg text-[10px] text-slate-300 flex justify-between items-center group">
+                      <span className="truncate flex-1 pr-2">{doc.name}</span>
+                      <button onClick={() => setDocuments(prev => prev.filter(d => d.id !== doc.id))} className="text-slate-600 hover:text-red-500 transition-colors"><X size={12}/></button>
+                    </div>
+                  ))
+                )}
               </div>
-              <div className="space-y-2">
-                {chats.map(chat => (
-                  <div 
-                    key={chat.id} 
-                    onClick={() => setActiveChatId(chat.id)}
-                    className={`group relative p-3 rounded-xl cursor-pointer transition-all border ${
-                      activeChatId === chat.id 
-                        ? 'bg-[#ca0607]/10 border-[#ca0607]/30 text-white' 
-                        : 'bg-transparent border-transparent text-slate-400 hover:bg-white/5 hover:text-slate-200'
-                    }`}
-                  >
-                    <p className="text-xs font-medium truncate pr-6">{chat.title}</p>
-                    <button 
-                      onClick={(e) => deleteChat(chat.id, e)}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-slate-600 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"
-                    >
-                      <X size={12} />
-                    </button>
+            </div>
+
+            <div className="space-y-3">
+              <div className="text-[10px] text-slate-500 font-bold uppercase tracking-widest px-1">Histórico</div>
+              <div className="space-y-1">
+                {chats.map(c => (
+                  <div key={c.id} onClick={() => setActiveChatId(c.id)} className={`p-2.5 rounded-lg text-[11px] truncate cursor-pointer transition-all ${activeChatId === c.id ? 'bg-[#ca0607]/20 text-white font-medium' : 'text-slate-400 hover:bg-white/5'}`}>
+                    {c.title}
                   </div>
                 ))}
               </div>
-            </section>
-
-            {/* Knowledge Base */}
-            <section>
-              <div className="flex items-center gap-2 mb-4 text-slate-500 font-bold text-[10px] uppercase tracking-[0.2em]">
-                <BookOpen size={14} className="text-[#ca0607]" />
-                <span>Conhecimento ({documents.length})</span>
-              </div>
-
-              {documents.length === 0 ? (
-                <div className="text-center py-8 px-4 bg-slate-900/40 rounded-2xl border border-slate-800 border-dashed">
-                  <FileUp className="mx-auto mb-2 text-slate-700" size={24} />
-                  <p className="text-[10px] text-slate-500 leading-relaxed uppercase tracking-wider">Arraste documentos para análise</p>
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  {documents.map(doc => (
-                    <div key={doc.id} className="group p-2 bg-slate-900/60 border border-slate-800 rounded-lg hover:border-[#ca0607]/50 transition-all animate-fade-in relative">
-                      <div className="flex items-start gap-2">
-                        <div className="p-1.5 bg-[#ca0607]/10 text-[#ca0607] rounded">
-                          {getDocIcon(doc.type)}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-[11px] font-medium text-slate-300 truncate pr-4">{doc.name}</p>
-                          <p className="text-[9px] text-slate-600 font-mono uppercase">{doc.size}</p>
-                        </div>
-                      </div>
-                      <button 
-                        onClick={() => removeDocument(doc.id)}
-                        className="absolute top-2 right-2 text-slate-600 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"
-                      >
-                        <Trash2 size={12} />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </section>
+            </div>
           </div>
-
-          <div className="p-4 bg-black border-t border-slate-800">
-            <label className={`
-              flex items-center justify-center gap-2 w-full py-3 px-4 rounded-xl font-bold text-sm transition-all cursor-pointer
-              ${isUploading ? 'bg-slate-800 text-slate-500' : 'bg-[#ca0607] text-white hover:bg-[#b00506] shadow-lg shadow-red-900/10'}
-            `}>
-              {isUploading ? <Loader2 size={18} className="animate-spin" /> : <FileUp size={18} />}
-              <span>{isUploading ? 'ANALISANDO...' : 'CARREGAR FICHEIROS'}</span>
-              <input 
-                type="file" 
-                className="hidden" 
-                accept=".pdf,.docx,.doc,.xlsx,.xls,.pptx,.ppt,.txt,.md,.csv,.json,.xml" 
-                multiple 
-                onChange={handleFileUpload}
-                disabled={isUploading}
-                ref={fileInputRef}
-              />
-            </label>
+          
+          <div className="p-4 border-t border-white/5 bg-black/20">
+             <button onClick={() => fileInputRef.current?.click()} className="w-full py-2.5 bg-[#ca0607] text-white rounded-lg text-[11px] font-bold flex items-center justify-center gap-2 shadow-lg active:scale-95 transition-all">
+               {isUploading ? <Loader2 size={14} className="animate-spin" /> : <UploadCloud size={14} />}
+               {isUploading ? "A carregar..." : "Carregar Documento"}
+             </button>
+             <input type="file" ref={fileInputRef} className="hidden" multiple accept=".pdf,.docx,.xlsx,.xls,.txt" onChange={handleFileUpload} />
           </div>
         </div>
       </aside>
 
-      {/* Main Chat Area */}
-      <main className="flex-1 flex flex-col bg-white relative">
-        <header className="h-20 border-b border-slate-100 flex items-center justify-between px-8 bg-white/80 backdrop-blur-md z-10 sticky top-0">
+      {/* Main Content */}
+      <main className="flex-1 flex flex-col relative bg-white overflow-hidden">
+        <header className="h-16 md:h-18 border-b bg-white/95 backdrop-blur-md flex items-center justify-between px-6 shrink-0 z-30 shadow-sm">
           <div className="flex items-center gap-4">
-            <div className="relative">
-              <div className="w-12 h-12 flex items-center justify-center p-1">
-                <img src={OPCO_LOGO_URL} alt="OPCO Buddy" className="w-full h-full object-contain" />
-              </div>
-              <div className="absolute -bottom-1 -right-1 w-4 h-4 bg-green-500 border-2 border-white rounded-full"></div>
-            </div>
-            <div>
-              <h2 className="text-base font-bold text-black tracking-tight uppercase italic">OPCO Buddy</h2>
-              <div className="flex items-center gap-2 text-[11px] text-slate-400 font-medium">
-                <span className="flex h-2 w-2 relative">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
-                  <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
-                </span>
-                OPCO DIGITAL SYSTEMS
+            <button onClick={() => setIsSidebarOpen(true)} className="md:hidden p-2 text-slate-500"><Menu size={22}/></button>
+            <div className="flex items-center gap-2.5">
+              <img src={OPCO_LOGO_URL} className="w-8 h-8" />
+              <div>
+                <h1 className="text-xs font-black uppercase tracking-wider text-slate-800">OPCO Buddy</h1>
+                <div className="text-[9px] text-green-500 font-bold flex items-center gap-1.5"><div className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse"></div> ONLINE</div>
               </div>
             </div>
           </div>
-          <div className="hidden md:flex items-center gap-2 px-3 py-1.5 bg-slate-50 rounded-full border border-slate-100">
-             <History size={14} className="text-slate-400" />
-             <span className="text-[10px] font-bold text-slate-500 uppercase">Flash Engine Ativa</span>
+          <div className="hidden lg:flex items-center gap-5">
+            <div className="flex items-center gap-1.5 text-[9px] font-bold text-slate-400 uppercase tracking-widest"><Sparkles size={12} className="text-[#ca0607]"/> Flash Image</div>
+            <div className="flex items-center gap-1.5 text-[9px] font-bold text-slate-400 uppercase tracking-widest"><Bot size={12} className="text-[#ca0607]"/> Flash Chat</div>
+            <div className="flex items-center gap-1.5 text-[9px] font-bold text-slate-400 uppercase tracking-widest"><FileBadge size={12} className="text-[#ca0607]"/> RAG Engine</div>
           </div>
         </header>
 
-        {/* Messages */}
-        <div className="flex-1 overflow-y-auto p-8 space-y-8 custom-scrollbar">
-          {messages.map((msg) => (
+        <div className="flex-1 overflow-y-auto p-4 md:p-10 space-y-6 custom-scrollbar bg-[#f8fafc]">
+          {activeChat?.messages.map(msg => (
             <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} animate-fade-in`}>
-              <div className={`flex gap-4 max-w-[90%] md:max-w-[75%] ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}>
-                <div className={`shrink-0 w-10 h-10 rounded-xl flex items-center justify-center shadow-sm border overflow-hidden ${
-                  msg.role === 'user' 
-                    ? 'bg-black text-[#ca0607] border-slate-800' 
-                    : 'bg-white border-slate-100'
-                }`}>
-                  {msg.role === 'user' ? <User size={20} /> : <img src={OPCO_LOGO_URL} alt="Buddy" className="w-full h-full p-1.5 object-contain" />}
-                </div>
-                <div className={`p-5 rounded-2xl shadow-sm border ${
-                  msg.role === 'user' 
-                    ? 'bg-black text-white border-slate-800' 
-                    : 'bg-white border-slate-100 text-slate-800 min-h-[50px]'
-                }`}>
-                  <div className={`prose prose-sm max-w-none ${msg.role === 'user' ? 'prose-invert' : 'prose-slate'}`}>
-                    <ReactMarkdown 
-                      components={{
-                        p: ({node, ...props}) => <p className="m-0 leading-relaxed font-normal" {...props} />,
-                        strong: ({node, ...props}) => <strong className="text-[#ca0607] font-bold" {...props} />,
-                        a: ({node, ...props}) => <a className="text-[#ca0607] underline font-medium" {...props} />
-                      }}
-                    >
-                      {msg.content}
-                    </ReactMarkdown>
+              <div className={`max-w-[92%] md:max-w-[80%] p-5 rounded-2xl shadow-sm border ${msg.role === 'user' ? 'bg-[#1e293b] text-white border-slate-700' : 'bg-white text-slate-800 border-slate-100'}`}>
+                {msg.attachedMedia && msg.attachedMedia.length > 0 && (
+                  <div className="mb-4 flex flex-wrap gap-2">
+                    {msg.attachedMedia.map(m => (
+                      <div key={m.id} className="w-16 h-16 rounded-lg overflow-hidden border border-slate-200 shadow-sm">
+                        <img src={m.url} className="w-full h-full object-cover" />
+                      </div>
+                    ))}
                   </div>
-                  <div className={`text-[9px] mt-3 font-bold uppercase tracking-widest ${msg.role === 'user' ? 'text-slate-500' : 'text-slate-400'}`}>
-                    {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                  </div>
+                )}
+                <div className={`prose prose-xs max-w-none ${msg.role === 'user' ? 'prose-invert opacity-95' : 'prose-slate'}`}>
+                  <ReactMarkdown components={{ strong: ({node, ...props}) => <strong className="text-[#ca0607]" {...props}/> }}>{msg.content}</ReactMarkdown>
                 </div>
+                
+                {msg.imageUrls && (
+                  <div className="mt-4 grid grid-cols-1 gap-4">
+                    {msg.imageUrls.map((url, i) => (
+                      <div key={i} className="group relative rounded-xl overflow-hidden border shadow-lg border-slate-100">
+                        <img src={url} className="w-full" />
+                        <a href={url} download={`opco-img-${i}.png`} className="absolute top-3 right-3 bg-black/40 hover:bg-[#ca0607] p-2 rounded-lg text-white transition-all"><Download size={16}/></a>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {msg.generatedFiles && (
+                  <div className="mt-5 space-y-2">
+                    {msg.generatedFiles.map((f, i) => (
+                      <a key={i} href={f.url} download={f.name} className="flex items-center gap-3 p-4 bg-slate-50 border border-slate-100 rounded-xl hover:border-[#ca0607] transition-all group shadow-sm">
+                        <div className="p-2 bg-red-50 text-[#ca0607] rounded-lg"><FileText size={20}/></div>
+                        <div className="flex-1 truncate">
+                          <div className="text-[10px] font-bold text-slate-400 uppercase leading-none mb-1">Documento Gerado</div>
+                          <div className="text-xs font-bold truncate text-slate-700">{f.name}</div>
+                        </div>
+                        <Download className="text-slate-300 group-hover:text-[#ca0607]" size={16}/>
+                      </a>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           ))}
-          {isTyping && !messages.find(m => m.id === (messages.length > 0 ? messages[messages.length-1].id : '') && m.content !== '') && (
-            <div className="flex justify-start animate-fade-in">
-              <div className="flex gap-4 max-w-[75%]">
-                <div className="shrink-0 w-10 h-10 rounded-xl bg-white border border-slate-100 flex items-center justify-center overflow-hidden">
-                  <img src={OPCO_LOGO_URL} alt="Buddy" className="w-full h-full p-1.5 object-contain" />
+          {isTyping && (
+            <div className="flex flex-col gap-3">
+              <div className="bg-white p-4 rounded-xl border border-slate-100 shadow-sm inline-flex items-center gap-3 w-fit">
+                <div className="flex gap-1.5">
+                  <div className="w-1.5 h-1.5 bg-[#ca0607] rounded-full animate-bounce"></div>
+                  <div className="w-1.5 h-1.5 bg-[#ca0607] rounded-full animate-bounce [animation-delay:0.2s]"></div>
+                  <div className="w-1.5 h-1.5 bg-[#ca0607] rounded-full animate-bounce [animation-delay:0.4s]"></div>
                 </div>
-                <div className="bg-slate-50 border border-slate-100 rounded-2xl p-5 flex gap-1.5 items-center">
-                  <div className="w-2 h-2 bg-[#ca0607] rounded-full animate-bounce"></div>
-                  <div className="w-2 h-2 bg-[#ca0607] rounded-full animate-bounce [animation-delay:0.2s]"></div>
-                  <div className="w-2 h-2 bg-[#ca0607] rounded-full animate-bounce [animation-delay:0.4s]"></div>
-                </div>
+                {statusMsg && <span className="text-[10px] font-bold text-[#ca0607] animate-pulse uppercase tracking-wider">{statusMsg}</span>}
               </div>
             </div>
           )}
-          <div ref={messagesEndRef} />
+          <div ref={messagesEndRef} className="h-4" />
         </div>
 
         {/* Input Area */}
-        <div className="p-8 pt-2 bg-white border-t border-slate-100">
-          <form onSubmit={handleSendMessage} className="relative max-w-5xl mx-auto group">
-            <div className="absolute left-6 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none group-focus-within:text-[#ca0607] transition-colors">
-              <MessageSquare size={20} />
+        <div className="p-4 md:p-6 border-t bg-white relative z-40 shadow-[0_-10px_20px_-15px_rgba(0,0,0,0.05)]">
+          {attachedMedia.length > 0 && (
+            <div className="max-w-4xl mx-auto mb-3 flex flex-wrap gap-2 animate-fade-in">
+              {attachedMedia.map(m => (
+                <div key={m.id} className="relative">
+                  <img src={m.url} className="w-10 h-10 object-cover rounded-lg border border-slate-100 shadow-sm" />
+                  <button onClick={() => setAttachedMedia(prev => prev.filter(x => x.id !== m.id))} className="absolute -top-1.5 -right-1.5 bg-red-500 text-white p-1 rounded-full shadow-lg"><X size={8}/></button>
+                </div>
+              ))}
             </div>
-            <input
-              type="text"
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              placeholder="Pergunte sobre qualquer documento ou tema..."
-              className="w-full bg-slate-50 border border-slate-200 rounded-3xl py-5 pl-14 pr-16 focus:outline-none focus:ring-4 focus:ring-[#ca0607]/5 focus:border-[#ca0607] transition-all text-slate-800 placeholder:text-slate-400 font-medium"
-              disabled={isTyping}
-            />
-            <button
-              type="submit"
-              disabled={!input.trim() || isTyping}
-              className={`absolute right-3 top-1/2 -translate-y-1/2 w-12 h-12 flex items-center justify-center rounded-2xl transition-all shadow-xl ${
-                !input.trim() || isTyping 
-                ? 'bg-slate-200 text-slate-400 cursor-not-allowed' 
-                : 'bg-[#ca0607] text-white hover:bg-black hover:scale-105 active:scale-95'
-              }`}
-            >
-              <Send size={22} />
+          )}
+          <form onSubmit={handleSendMessage} className="max-w-4xl mx-auto flex items-center gap-2 relative">
+            <div className="flex items-center bg-slate-50 border border-slate-200 rounded-2xl flex-1 px-2">
+               <button type="button" onClick={() => mediaInputRef.current?.click()} className="p-2 text-slate-400 hover:text-[#ca0607] transition-colors"><ImageIcon size={18} /></button>
+               <button type="button" onClick={() => docInputRef.current?.click()} className="p-2 text-slate-400 hover:text-[#ca0607] transition-colors"><FileUp size={18} /></button>
+               <input 
+                type="text" 
+                value={input} 
+                onChange={e => setInput(e.target.value)} 
+                placeholder="Analise documentos, crie manuais ou gere imagens..." 
+                className="flex-1 bg-transparent py-3.5 px-2 focus:outline-none text-sm font-medium text-slate-700 placeholder:text-slate-400"
+              />
+            </div>
+            <button type="submit" disabled={isTyping || (!input.trim() && attachedMedia.length === 0)} className="bg-[#ca0607] text-white w-12 h-12 rounded-2xl flex items-center justify-center hover:bg-black disabled:bg-slate-50 disabled:text-slate-200 shadow-md active:scale-95 transition-all shrink-0">
+              <Send size={18} />
             </button>
+            
+            <input type="file" ref={mediaInputRef} className="hidden" multiple accept="image/*" onChange={handleMediaUpload} />
+            <input type="file" ref={docInputRef} className="hidden" multiple accept=".pdf,.docx,.xlsx,.xls,.txt" onChange={handleFileUpload} />
           </form>
-          
-          <div className="mt-6 flex flex-col items-center gap-4">
-            <div className="flex flex-wrap items-center justify-center gap-6 text-[10px] text-slate-400 font-bold uppercase tracking-widest">
-              <div className="flex items-center gap-2">
-                  <CheckCircle2 size={14} className="text-[#ca0607]" />
-                  <span>Base de Dados Abrangente</span>
-              </div>
-              <div className="w-1.5 h-1.5 bg-slate-200 rounded-full"></div>
-              <div className="flex items-center gap-2">
-                  <div className="w-3 h-3 bg-black rounded-full"></div>
-                  <span>Confidencialidade OPCO</span>
-              </div>
-              <div className="w-1.5 h-1.5 bg-slate-200 rounded-full"></div>
-              <div className="hover:text-[#ca0607] cursor-pointer transition-colors">OPCO DIGITAL</div>
-            </div>
 
-            {/* Dados da Empresa */}
-            <div className="flex flex-col items-center gap-2 text-center border-t border-slate-50 pt-4 w-full max-w-2xl">
-              <div className="flex items-center gap-2 text-[10px] text-slate-500 font-medium italic">
-                <MapPin size={10} className="text-[#ca0607]" />
-                Rua José Augusto Coelho, Nº 158, 2925-539 Vila Nogueira de Azeitão
-              </div>
-              <div className="flex flex-wrap items-center justify-center gap-4 text-[10px] font-bold text-slate-600">
-                <div className="flex items-center gap-1.5">
-                  <Phone size={10} className="text-[#ca0607]" />
-                  <span>+351 210 152 492</span>
-                </div>
-                <div className="w-1 h-1 bg-slate-300 rounded-full"></div>
-                <div className="flex items-center gap-1.5">
-                  <Mail size={10} className="text-[#ca0607]" />
-                  <a href="mailto:opco@opco.pt" className="hover:text-[#ca0607] transition-colors uppercase tracking-tighter">opco@opco.pt</a>
-                </div>
-              </div>
+          {/* Minimalist Contact Section */}
+          <div className="mt-5 pt-4 border-t border-slate-50 max-w-4xl mx-auto flex flex-col md:flex-row items-center justify-between gap-3 text-center md:text-left">
+            <div className="flex flex-wrap justify-center md:justify-start gap-x-4 gap-y-1 text-[8px] text-slate-400 font-bold uppercase tracking-widest">
+              <div className="flex items-center gap-1"><MapPin size={9} className="text-[#ca0607]"/> Azeitão Office Center</div>
+              <div className="flex items-center gap-1"><Phone size={9} className="text-[#ca0607]"/> +351 210 152 492</div>
+              <div className="flex items-center gap-1"><Mail size={9} className="text-[#ca0607]"/> opco@opco.pt</div>
+            </div>
+            <div className="text-[8px] text-slate-300 font-bold uppercase tracking-[0.1em]">
+              OPCO Buddy &copy; {new Date().getFullYear()}
             </div>
           </div>
         </div>
