@@ -457,7 +457,7 @@ const App = () => {
     setInput(''); setIsTyping(true); setStatusMsg(t.loading);
 
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+      const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY });
       
       // Aggregate context from selected documents
       const docsToAnalyze = focusedDocs.length > 0 ? focusedDocs : documents;
