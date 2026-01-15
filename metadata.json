@@ -1,5 +1,7 @@
 {
-  "description": "OPCO Buddy - Consultoria Inteligente e RAG de documentos",
-  "requestFramePermissions": [],
-  "name": "OPCO Buddy"
+  "description": "My OPCO - Consultoria Inteligente e RAG de documentos",
+  "requestFramePermissions": [
+    "camera"
+  ],
+  "name": "My OPCO"
 }
