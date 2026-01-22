@@ -1,4 +1,3 @@
-
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { createRoot } from 'react-dom/client';
 import { GoogleGenAI, Type, FunctionDeclaration, GenerateContentResponse } from '@google/genai';
@@ -188,7 +187,8 @@ const runExportToPDF = (content: string, chartData: ChartData | null) => {
 
       // Calculate max height for this row
       let maxHeight = 6;
-      if (rowIndex === 0) doc.setFontSize(7.5); else doc.setFontSize(8.5);
+      // REDUCED Header Font Size as requested
+      if (rowIndex === 0) doc.setFontSize(6.5); else doc.setFontSize(8.5);
 
       row.forEach((cell) => {
         const textLines = doc.splitTextToSize(cell, colWidth - 4);
@@ -196,8 +196,8 @@ const runExportToPDF = (content: string, chartData: ChartData | null) => {
       });
 
       if (rowIndex === 0) {
-        // Header background
-        doc.setFillColor(248, 248, 248);
+        // Professional Header background
+        doc.setFillColor(245, 245, 245);
         doc.rect(margin, y - 5, contentWidth, maxHeight + 4, 'F');
         doc.setFont("helvetica", "bold");
         doc.setTextColor(red[0], red[1], red[2]);
@@ -211,8 +211,8 @@ const runExportToPDF = (content: string, chartData: ChartData | null) => {
         doc.text(textLines, margin + (colIndex * colWidth) + 2, y);
       });
 
-      // Horizontal separator line
-      doc.setDrawColor(235, 235, 235);
+      // Professional horizontal separator line
+      doc.setDrawColor(230, 230, 230);
       doc.setLineWidth(0.1);
       doc.line(margin, y + maxHeight - 2, pageWidth - margin, y + maxHeight - 2);
 
@@ -277,7 +277,7 @@ const runExportToExcel = (content: string) => {
 
     const ws = XLSX.utils.aoa_to_sheet(rows);
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Dados_OPCO");
+    XLSX.utils.book_append_sheet(wb, ws, "Dados_Extraidos");
     XLSX.writeFile(wb, `Dados_OPCO_${Date.now()}.xlsx`);
   } catch (error) {
     console.error("Erro ao exportar Excel:", error);
@@ -309,6 +309,11 @@ const MarkdownComponents = (isDark: boolean) => ({
     <td className={`px-2 py-1.5 border-r last:border-r-0 align-top ${isDark ? 'text-slate-300 border-slate-800/50' : 'text-slate-700 border-slate-100'}`}>
       {children}
     </td>
+  ),
+  thead_tr: ({ children }: any) => (
+    <tr className={`border-b last:border-b-0 ${isDark ? 'border-slate-800/50 even:bg-slate-900/40' : 'border-slate-100 even:bg-slate-50/50'}`}>
+      {children}
+    </tr>
   ),
   tr: ({ children }: any) => (
     <tr className={`border-b last:border-b-0 ${isDark ? 'border-slate-800/50 even:bg-slate-900/40' : 'border-slate-100 even:bg-slate-50/50'}`}>
@@ -513,7 +518,12 @@ const App = () => {
         model: 'gemini-3-flash-preview',
         contents: [...history, { role: 'user', parts: currentTurnParts }],
         config: {
-          systemInstruction: "És o MY OPCO, Consultor de Inteligência da OPCO. Quando questionado sobre a OPCO, utiliza prioritariamente informações de https://opco.pt/ e documentos anexados. Responde sempre em Português de Portugal. Remove qualquer referência a 'OPCO Digital Systems'. Use Markdown profissional com tabelas estruturadas. Se estiveres no modo DOCS (sem pesquisa web ativa) e o utilizador fizer perguntas triviais, sobre eventos atuais ou tempo real (como 'que dia é hoje'), responde educadamente que não consegues obter essa informação por estares apenas em modo DOCS e não inventes respostas. Se houver análise comparativa, gere tabelas claras.",
+          systemInstruction: `És o MY OPCO, Consultor de Inteligência da OPCO. Quando questionado sobre a OPCO, utiliza prioritariamente informações de https://opco.pt/ e documentos anexados. Responde sempre em Português de Portugal. Remove qualquer referência a 'OPCO Digital Systems'. Use Markdown profissional com tabelas estruturadas. 
+          
+          REGRAS CRÍTICAS:
+          1. Se estiveres no modo DOCS (pesquisa web desativada) e o utilizador fizer perguntas triviais, sobre eventos atuais ou tempo real (como 'que dia é hoje' ou 'notícias de agora'), responde educadamente que não consegues obter essa informação por estares apenas em modo DOCS e não tens acesso a dados em tempo real. NÃO INVENTES NEM ALUCINES DATAS OU EVENTOS.
+          2. Se houver análise comparativa ou extração de dados, gera tabelas profissionais claras.
+          3. Ao detetares pedidos de relatórios ou sínteses estruturadas, DEVES incluir obrigatoriamente as tags [PDF_REPORT_READY] ou [EXCEL_READY] no final da resposta para ativar os botões de download.`,
           tools: searchMode === 'hybrid' ? [{ googleSearch: {} }] : []
         }
       });
@@ -521,8 +531,15 @@ const App = () => {
       let fullResponse = result.text || "";
       let grounding: GroundingChunk[] = result.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
       let autoDoc: 'pdf' | 'excel' | undefined = undefined;
-      if (fullResponse.includes("[PDF_REPORT_READY]")) { autoDoc = 'pdf'; fullResponse = fullResponse.replace("[PDF_REPORT_READY]", "").trim(); }
-      if (fullResponse.includes("[EXCEL_READY]")) { autoDoc = 'excel'; fullResponse = fullResponse.replace("[EXCEL_READY]", "").trim(); }
+      
+      // Look for the special tags in the response content
+      if (fullResponse.includes("[PDF_REPORT_READY]")) { 
+        autoDoc = 'pdf'; 
+        fullResponse = fullResponse.replace("[PDF_REPORT_READY]", "").trim(); 
+      } else if (fullResponse.includes("[EXCEL_READY]")) { 
+        autoDoc = 'excel'; 
+        fullResponse = fullResponse.replace("[EXCEL_READY]", "").trim(); 
+      }
       
       setChats(prev => prev.map(c => c.id === activeChatId ? {
         ...c,
@@ -536,7 +553,8 @@ const App = () => {
 
   const handleStop = () => { if (abortControllerRef.current) { abortControllerRef.current.abort(); setIsTyping(false); addToast("Interrompido", "info"); } };
 
-  const MessageBubble = ({ msg }: { msg: Message }) => {
+  // Fix: Added key property to the props object type definition to resolve TypeScript error when MessageBubble is used within a map()
+  const MessageBubble = ({ msg }: { msg: Message; key?: React.Key }) => {
     const isUser = msg.role === 'user';
     const swipeHandlers = useSwipeReply(() => { setReplyingTo(msg); promptRef.current?.focus(); });
     const copyToClipboard = () => { navigator.clipboard.writeText(msg.content); addToast("Copiado!", "success"); };
@@ -591,11 +609,14 @@ const App = () => {
   return (
     <div className={`flex h-screen overflow-hidden transition-colors duration-500 ${isDark ? 'bg-slate-950 text-white dark' : 'bg-[#f8fafc] text-slate-900'}`}>
       <aside className={`fixed inset-y-0 left-0 z-50 w-64 bg-[#0f172a] border-r border-slate-800 transition-transform md:relative md:translate-x-0 ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full shadow-2xl'}`}>
-        <div className="absolute inset-0 pointer-events-none opacity-[0.03] z-0"><img src={NEURAL_BG_URL} className="w-full h-full object-cover grayscale" alt="Neural" /></div>
+        {/* Transparent Neural Image Background as requested */}
+        <div className="absolute inset-0 pointer-events-none opacity-[0.10] z-0">
+          <img src={NEURAL_BG_URL} className="w-full h-full object-cover grayscale" alt="Neural" />
+        </div>
         <div className="relative z-10 flex flex-col h-full">
           <div className="p-5 border-b border-slate-800/50 flex items-center gap-3 bg-slate-900/30 backdrop-blur-md">
             <img src={SPHERE_LOGO_URL} className="w-5 h-5 object-contain" alt="Sphere" />
-            <span className="font-bold text-[10px] uppercase tracking-widest text-white">MY OPCO</span>
+            <span className="font-bold text-[10px] uppercase tracking-widest text-white">MY OPCO INTEL</span>
           </div>
           <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">
             <button onClick={createNewChat} className="w-full py-2.5 bg-[#ca0607] rounded-xl text-white text-[9px] font-bold uppercase tracking-widest flex items-center justify-center gap-2 shadow-lg hover:bg-red-700 transition-all mb-6 active:scale-95 group">
@@ -637,12 +658,13 @@ const App = () => {
              <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="md:hidden p-2 text-slate-500"><Menu size={20}/></button>
              <div className="flex items-center gap-2">
                <div className="relative"><div className="w-2 h-2 bg-emerald-500 rounded-full" /><div className="absolute inset-0 w-2 h-2 bg-emerald-500 rounded-full animate-ping opacity-30" /></div>
-               <span className={`text-[9px] font-bold uppercase tracking-widest ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>O SEU ASSISTENTE DIGITAL</span>
+               <span className={`text-[9px] font-bold uppercase tracking-widest ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Rede Ativa OPCO</span>
              </div>
            </div>
            <div className="flex items-center"><img src={OPCO_LOGO_URL} className="h-10 w-auto" alt="OPCO" /></div>
         </header>
         <div className="flex-1 overflow-y-auto p-4 sm:p-8 custom-scrollbar max-w-4xl mx-auto w-full">
+           {/* Fix: Component correctly receives msg prop while TypeScript allows key prop for reconciliation */}
            {activeChat?.messages.map(msg => <MessageBubble key={msg.id} msg={msg} />)}
            {isTyping && (
              <div className="flex items-center gap-2.5 text-[#ca0607] py-4 px-2">
