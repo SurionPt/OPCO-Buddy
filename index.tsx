@@ -595,7 +595,7 @@ const App = () => {
         <div className="relative z-10 flex flex-col h-full">
           <div className="p-5 border-b border-slate-800/50 flex items-center gap-3 bg-slate-900/30 backdrop-blur-md">
             <img src={SPHERE_LOGO_URL} className="w-5 h-5 object-contain" alt="Sphere" />
-            <span className="font-bold text-[10px] uppercase tracking-widest text-white">MY OPCO INTEL</span>
+            <span className="font-bold text-[10px] uppercase tracking-widest text-white">MY OPCO</span>
           </div>
           <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">
             <button onClick={createNewChat} className="w-full py-2.5 bg-[#ca0607] rounded-xl text-white text-[9px] font-bold uppercase tracking-widest flex items-center justify-center gap-2 shadow-lg hover:bg-red-700 transition-all mb-6 active:scale-95 group">
@@ -637,7 +637,7 @@ const App = () => {
              <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="md:hidden p-2 text-slate-500"><Menu size={20}/></button>
              <div className="flex items-center gap-2">
                <div className="relative"><div className="w-2 h-2 bg-emerald-500 rounded-full" /><div className="absolute inset-0 w-2 h-2 bg-emerald-500 rounded-full animate-ping opacity-30" /></div>
-               <span className={`text-[9px] font-bold uppercase tracking-widest ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Rede Ativa OPCO</span>
+               <span className={`text-[9px] font-bold uppercase tracking-widest ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>O SEU ASSISTENTE DIGITAL</span>
              </div>
            </div>
            <div className="flex items-center"><img src={OPCO_LOGO_URL} className="h-10 w-auto" alt="OPCO" /></div>
