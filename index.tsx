@@ -132,12 +132,8 @@ const cleanMarkdownForPDF = (text: string) => {
   return text
     .replace(/\[PDF_REPORT_READY\]/g, '')
     .replace(/\[EXCEL_READY\]/g, '')
-    .replace(/\|?\s*[:\-]+\s*\|?\s*[:\-]+\s*\|?/g, '') 
-    .replace(/\|\s+\*\*/g, '|') 
-    .replace(/\*\*\s+\|/g, '|') 
     .replace(/\*\*/g, '') 
     .replace(/#/g, '') 
-    .replace(/\|/g, '  ') 
     .trim();
 };
 
@@ -172,25 +168,91 @@ const runExportToPDF = (content: string, chartData: ChartData | null) => {
   doc.text("RELATÓRIO ESTRATÉGICO", margin, 40);
   y = 55;
 
-  const rawText = cleanMarkdownForPDF(content);
-  const sections = rawText.split('\n');
+  const lines = content.split('\n');
+  let inTable = false;
+  let tableRows: string[][] = [];
 
-  sections.forEach((section) => {
-    let line = section.trim();
-    if (!line) return;
-    if (y > pageHeight - 30) { doc.addPage(); drawHeaderFooter(doc.getNumberOfPages()); y = 30; }
+  const flushTable = () => {
+    if (tableRows.length === 0) return;
+    
+    const colCount = tableRows[0].length;
+    const colWidth = contentWidth / colCount;
+    
+    tableRows.forEach((row, rowIndex) => {
+      // Check for page overflow
+      if (y > pageHeight - 30) {
+        doc.addPage();
+        drawHeaderFooter(doc.getNumberOfPages());
+        y = 30;
+      }
 
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(10.5);
-    doc.setTextColor(45, 55, 72);
-    const wrappedLines = doc.splitTextToSize(line, contentWidth);
-    wrappedLines.forEach((wLine: string) => {
-      if (y > pageHeight - 20) { doc.addPage(); drawHeaderFooter(doc.getNumberOfPages()); y = 30; }
-      doc.text(wLine, margin, y);
-      y += 6;
+      if (rowIndex === 0) {
+        // Header styling
+        doc.setFillColor(240, 240, 240);
+        doc.rect(margin, y - 5, contentWidth, 8, 'F');
+        doc.setFont("helvetica", "bold");
+        doc.setTextColor(dark[0], dark[1], dark[2]);
+      } else {
+        doc.setFont("helvetica", "normal");
+        doc.setTextColor(45, 55, 72);
+      }
+
+      let maxHeight = 0;
+      row.forEach((cell, colIndex) => {
+        const textLines = doc.splitTextToSize(cell, colWidth - 4);
+        maxHeight = Math.max(maxHeight, textLines.length * 5);
+      });
+
+      row.forEach((cell, colIndex) => {
+        const textLines = doc.splitTextToSize(cell, colWidth - 4);
+        doc.text(textLines, margin + (colIndex * colWidth) + 2, y);
+      });
+
+      // Draw bottom line
+      doc.setDrawColor(230, 230, 230);
+      doc.setLineWidth(0.1);
+      doc.line(margin, y + 2, pageWidth - margin, y + 2);
+
+      y += maxHeight + 2;
     });
-    y += 3;
+
+    tableRows = [];
+    inTable = false;
+    y += 5;
+  };
+
+  lines.forEach((line) => {
+    const isTableRow = line.includes('|');
+    const isDivider = line.match(/^[:\s-|\d]+$/);
+
+    if (isTableRow && !isDivider) {
+      const cells = line.split('|').map(c => c.trim()).filter((c, i, a) => !( (i === 0 || i === a.length - 1) && c === ''));
+      if (cells.length > 0) {
+        tableRows.push(cells);
+        inTable = true;
+      }
+    } else if (inTable && !isTableRow) {
+      flushTable();
+    } else if (!isTableRow) {
+      if (y > pageHeight - 30) { doc.addPage(); drawHeaderFooter(doc.getNumberOfPages()); y = 30; }
+      
+      const cleanLine = cleanMarkdownForPDF(line);
+      if (!cleanLine) return;
+
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(10.5);
+      doc.setTextColor(45, 55, 72);
+      const wrappedLines = doc.splitTextToSize(cleanLine, contentWidth);
+      wrappedLines.forEach((wLine: string) => {
+        if (y > pageHeight - 20) { doc.addPage(); drawHeaderFooter(doc.getNumberOfPages()); y = 30; }
+        doc.text(wLine, margin, y);
+        y += 6;
+      });
+      y += 2;
+    }
   });
+
+  if (inTable) flushTable();
 
   doc.save(`Relatorio_Executivo_OPCO_${Date.now()}.pdf`);
 };
@@ -449,8 +511,9 @@ const App = () => {
     const controller = new AbortController();
     abortControllerRef.current = controller;
     
+    const userMsgId = Date.now().toString() + '-user-' + Math.floor(Math.random() * 1000);
     const userMsg: Message = { 
-      id: Date.now().toString(), 
+      id: userMsgId, 
       role: 'user', 
       content: input, 
       timestamp: new Date().toISOString(),
@@ -463,7 +526,7 @@ const App = () => {
     const currentImage = pastedImage;
     setInput(''); setIsTyping(true); setReplyingTo(null); setPastedImage(null);
 
-    let assistantMsgId = Date.now().toString();
+    const assistantMsgId = Date.now().toString() + '-asst-' + Math.floor(Math.random() * 1000);
     const assistantMsg: Message = { 
       id: assistantMsgId, 
       role: 'assistant', 
@@ -492,7 +555,7 @@ const App = () => {
       if (currentImage) currentTurnParts.push({ inlineData: { data: currentImage.data, mimeType: currentImage.mimeType } });
       currentTurnParts.push({ text: currentInput || "Analise o contexto visual." });
 
-      const stream = await ai.models.generateContentStream({
+      const result = await ai.models.generateContent({
         model: 'gemini-3-flash-preview',
         contents: [...history, { role: 'user', parts: currentTurnParts }],
         config: {
@@ -501,38 +564,17 @@ const App = () => {
         }
       });
 
-      let fullResponse = "";
-      let grounding: GroundingChunk[] = [];
+      let fullResponse = result.text || "";
+      let grounding: GroundingChunk[] = result.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
 
-      for await (const chunk of stream) {
-        if (controller.signal.aborted) break;
-        const chunkText = chunk.text;
-        fullResponse += chunkText;
-        
-        // Extract grounding chunks if available
-        const metadata = chunk.candidates?.[0]?.groundingMetadata;
-        if (metadata?.groundingChunks) {
-          grounding = metadata.groundingChunks;
-        }
-
-        setChats(prev => prev.map(c => c.id === activeChatId ? {
-          ...c,
-          messages: c.messages.map(m => m.id === assistantMsgId ? { ...m, content: fullResponse, sources: grounding.length > 0 ? grounding : m.sources } : m)
-        } : c));
-      }
-
-      // Final processing for auto-documents
-      if (!controller.signal.aborted) {
-        let finalContent = fullResponse;
-        let autoDoc: 'pdf' | 'excel' | undefined = undefined;
-        if (finalContent.includes("[PDF_REPORT_READY]")) { autoDoc = 'pdf'; finalContent = finalContent.replace("[PDF_REPORT_READY]", "").trim(); }
-        if (finalContent.includes("[EXCEL_READY]")) { autoDoc = 'excel'; finalContent = finalContent.replace("[EXCEL_READY]", "").trim(); }
-        
-        setChats(prev => prev.map(c => c.id === activeChatId ? {
-          ...c,
-          messages: c.messages.map(m => m.id === assistantMsgId ? { ...m, content: finalContent, autoDocument: autoDoc, sources: grounding } : m)
-        } : c));
-      }
+      let autoDoc: 'pdf' | 'excel' | undefined = undefined;
+      if (fullResponse.includes("[PDF_REPORT_READY]")) { autoDoc = 'pdf'; fullResponse = fullResponse.replace("[PDF_REPORT_READY]", "").trim(); }
+      if (fullResponse.includes("[EXCEL_READY]")) { autoDoc = 'excel'; fullResponse = fullResponse.replace("[EXCEL_READY]", "").trim(); }
+      
+      setChats(prev => prev.map(c => c.id === activeChatId ? {
+        ...c,
+        messages: c.messages.map(m => m.id === assistantMsgId ? { ...m, content: fullResponse, sources: grounding, autoDocument: autoDoc } : m)
+      } : c));
 
     } catch (e: any) {
       if (e.name !== 'AbortError') addToast("Falha na Rede OPCO", "error");
@@ -565,7 +607,7 @@ const App = () => {
     return (
       <div 
         {...swipeHandlers}
-        className={`flex flex-col mb-2.5 w-full group/msg relative transition-all duration-300 ${isUser ? 'items-end' : 'items-start'}`}
+        className={`flex flex-col mb-4 w-full group/msg relative transition-all duration-300 ${isUser ? 'items-end' : 'items-start'}`}
       >
         <div className={`flex flex-col max-w-[88%] md:max-w-[75%] ${isUser ? 'items-end' : 'items-start'}`}>
           {msg.replyTo && (
@@ -575,13 +617,13 @@ const App = () => {
             </div>
           )}
 
-          <div className={`relative px-2.5 py-1.5 rounded-2xl shadow-sm border transition-all inline-block w-auto min-w-[60px] ${
+          <div className={`relative px-3 py-2 rounded-2xl shadow-sm border transition-all inline-block w-auto min-w-[60px] ${
             isUser 
               ? (isDark ? 'bg-[#ca0607] border-transparent text-white rounded-tr-none' : 'bg-[#0f172a] border-transparent text-white rounded-tr-none') 
               : (isDark ? 'bg-slate-900 border-slate-800 text-slate-100 rounded-tl-none' : 'bg-white border-slate-200 text-slate-800 rounded-tl-none')
           }`}>
             {msg.image && (
-              <div className="mb-1.5 rounded-lg overflow-hidden border border-white/5 max-w-full">
+              <div className="mb-2 rounded-lg overflow-hidden border border-white/5 max-w-full">
                 <img src={`data:${msg.image.mimeType};base64,${msg.image.data}`} className="w-full max-h-[220px] object-contain" alt="Pasted" />
               </div>
             )}
@@ -622,7 +664,7 @@ const App = () => {
               <button onClick={() => { setReplyingTo(msg); promptRef.current?.focus(); }} className="p-1 rounded-full bg-[#ca0607] text-white"><ReplyIcon size={11}/></button>
             </div>
             
-            <div className="flex justify-end mt-0.5 opacity-30 text-[7px] font-medium">
+            <div className="flex justify-end mt-1 opacity-30 text-[7px] font-medium">
               {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
             </div>
           </div>
@@ -740,10 +782,16 @@ const App = () => {
           <div className="max-w-2xl mx-auto relative">
              
              {pastedImage && (
-               <div className="absolute bottom-full left-0 mb-3 animate-in slide-in-from-bottom-2">
-                 <div className="relative group rounded-lg overflow-hidden border border-[#ca0607] bg-white dark:bg-slate-900 p-0.5 shadow-lg">
-                    <img src={`data:${pastedImage.mimeType};base64,${pastedImage.data}`} className="w-16 h-16 object-cover rounded-md" alt="Preview" />
-                    <button onClick={() => setPastedImage(null)} className="absolute -top-1.5 -right-1.5 bg-red-600 text-white p-0.5 rounded-full shadow-md"><X size={8} /></button>
+               <div className="absolute bottom-full left-0 mb-4 animate-in slide-in-from-bottom-2 z-50">
+                 <div className="relative group rounded-xl overflow-hidden border-2 border-[#ca0607] bg-white dark:bg-slate-900 p-1 shadow-2xl backdrop-blur-md">
+                    <img src={`data:${pastedImage.mimeType};base64,${pastedImage.data}`} className="w-20 h-20 object-cover rounded-lg" alt="Preview" />
+                    <button 
+                      onClick={() => setPastedImage(null)} 
+                      className="absolute -top-2 -right-2 bg-red-600 text-white p-1 rounded-full shadow-lg hover:bg-red-700 active:scale-90 transition-all border-2 border-white dark:border-slate-900"
+                      title="Remover Imagem"
+                    >
+                      <X size={12} strokeWidth={3} />
+                    </button>
                  </div>
                </div>
              )}
