@@ -16,34 +16,49 @@
             font-family: 'Inter', sans-serif; 
             -webkit-tap-highlight-color: transparent; 
             overscroll-behavior-y: contain;
-            background-color: #fcfcfc;
+            background-color: #f8fafc;
+            font-size: 11px; /* Global Reduction */
         }
-        .opco-red { background-color: #ca0607; }
-        .opco-text-red { color: #ca0607; }
         
-        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+        .custom-scrollbar::-webkit-scrollbar { width: 3px; height: 3px; }
         .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
-        .custom-scrollbar::-webkit-scrollbar-thumb { background: #e2e8f0; border-radius: 10px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+        .dark .custom-scrollbar::-webkit-scrollbar-thumb { background: #334155; }
         
         @keyframes fadeIn { 
-            from { opacity: 0; transform: translateY(10px); } 
-            to { opacity: 1; transform: translateY(0); } 
+            from { opacity: 0; transform: translateY(8px) scale(0.98); } 
+            to { opacity: 1; transform: translateY(0) scale(1); } 
         }
         .animate-fade-in { animation: fadeIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
 
         textarea { 
             -webkit-appearance: none; 
-            border-radius: 0; 
             border: none;
+            outline: none;
+            line-height: 1.4;
         }
         
-        /* Message bubble animations */
-        .prose p { margin-bottom: 0.75rem; }
+        /* Table responsiveness improvements */
+        table { border-collapse: collapse; min-width: 100%; }
+        
+        /* Prose adjustments for chat bubbles */
+        .prose p { margin-bottom: 0.5rem; }
         .prose p:last-child { margin-bottom: 0; }
+        .prose ul, .prose ol { margin-top: 0.25rem; margin-bottom: 0.25rem; }
+        .prose li { margin-bottom: 0.15rem; }
 
-        @media (max-width: 640px) {
-            .mobile-input-shadow {
-                box-shadow: 0 -10px 30px -5px rgba(0,0,0,0.05);
+        /* Swipe indicator hint (optional) */
+        @media (max-width: 768px) {
+            .group\/msg:active::before {
+                content: '';
+                position: absolute;
+                left: 0;
+                top: 0;
+                bottom: 0;
+                width: 3px;
+                background: #ca0607;
+                border-radius: 2px;
+                opacity: 0.5;
             }
         }
     </style>
@@ -66,7 +81,7 @@
 }
 </script>
 </head>
-<body class="bg-[#fcfcfc] text-slate-900 min-h-screen overflow-hidden">
+<body class="bg-[#f8fafc] text-slate-900 min-h-screen overflow-hidden">
     <div id="root"></div>
     <script type="module" src="index.tsx"></script>
 </body>
