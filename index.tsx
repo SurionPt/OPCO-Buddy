@@ -1,4 +1,3 @@
-
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { createRoot } from 'react-dom/client';
 import { GoogleGenAI, Type, FunctionDeclaration, GenerateContentResponse } from '@google/genai';
@@ -516,13 +515,11 @@ const App = () => {
         config: {
           systemInstruction: `És o MY OPCO, Consultor de Inteligência da OPCO. Responde sempre em Português de Portugal. Remove qualquer referência a 'OPCO Digital Systems'. Usa Markdown profissional com tabelas estruturadas.
           
-          MODO ATUAL: ${searchMode === 'docs' ? 'DOCS (RESTRITO AOS DOCUMENTOS)' : 'DOCS + WEB (HÍBRIDO)'}
-          
-          REGRAS DE PESQUISA CRÍTICAS:
-          1. Se estiveres no MODO DOCS: Pesquisa EXCLUSIVAMENTE dentro dos documentos carregados pelo utilizador. Se a resposta não estiver nos documentos ou se forem perguntas triviais/atuais (ex: 'que dia é hoje' ou 'tempo atual'), responde educadamente que não tens acesso a essa informação por estares no modo de análise restrita de documentos. NÃO INVENTES NEM ALUCINES RESPOSTAS.
-          2. Se estiveres no MODO DOCS + WEB: Utiliza os documentos anexados E a pesquisa Google para complementar, validar e enriquecer as tuas respostas tanto a nível visual como descritivo.
-          3. Gera tabelas profissionais para qualquer análise comparativa ou listagem de dados.
-          4. No final de análises ou relatórios detalhados, DEVES incluir obrigatoriamente a tag [PDF_REPORT_READY] ou [EXCEL_READY] para que o utilizador possa descarregar o ficheiro.`,
+          REGRAS CRÍTICAS:
+          1. NUNCA respondas com "Olá, sou o MY OPCO, o seu Consultor de Inteligência" ou apresentações semelhantes se o utilizador já tiver iniciado a conversa. Sê direto e acionável.
+          2. MODO DOCS: Pesquisa EXCLUSIVAMENTE dentro dos documentos carregados. Se a informação não existir nos ficheiros ou forem perguntas triviais de tempo real (ex: 'que horas são', 'previsão do tempo'), responde educadamente que não tens acesso a esses dados por estares no modo restrito de análise de documentos. NÃO INVENTES RESPOSTAS FORA DOS DOCUMENTOS.
+          3. MODO DOCS + WEB: Utiliza os documentos carregados E a pesquisa Google Search para enriquecer as respostas com dados atualizados e visuais.
+          4. Ao gerar relatórios ou resumos estruturados, inclui SEMPRE a tag [PDF_REPORT_READY] ou [EXCEL_READY] no final para ativar os downloads.`,
           tools: searchMode === 'hybrid' ? [{ googleSearch: {} }] : []
         }
       });
@@ -612,7 +609,7 @@ const App = () => {
         <div className="relative z-10 flex flex-col h-full">
           <div className="p-5 border-b border-slate-800/50 flex items-center gap-3 bg-slate-900/30 backdrop-blur-md">
             <img src={SPHERE_LOGO_URL} className="w-5 h-5 object-contain" alt="Sphere" />
-            <span className="font-bold text-[10px] uppercase tracking-widest text-white">MY OPCO INTEL</span>
+            <span className="font-bold text-[10px] uppercase tracking-widest text-white">MY OPCO</span>
           </div>
           <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">
             <button onClick={createNewChat} className="w-full py-2.5 bg-[#ca0607] rounded-xl text-white text-[9px] font-bold uppercase tracking-widest flex items-center justify-center gap-2 shadow-lg hover:bg-red-700 transition-all mb-6 active:scale-95 group">
@@ -654,7 +651,7 @@ const App = () => {
              <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="md:hidden p-2 text-slate-500"><Menu size={20}/></button>
              <div className="flex items-center gap-2">
                <div className="relative"><div className="w-2 h-2 bg-emerald-500 rounded-full" /><div className="absolute inset-0 w-2 h-2 bg-emerald-500 rounded-full animate-ping opacity-30" /></div>
-               <span className={`text-[9px] font-bold uppercase tracking-widest ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Rede Ativa OPCO</span>
+               <span className={`text-[9px] font-bold uppercase tracking-widest ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Assistente Digital My OPCO</span>
              </div>
            </div>
            <div className="flex items-center"><img src={OPCO_LOGO_URL} className="h-10 w-auto" alt="OPCO" /></div>
