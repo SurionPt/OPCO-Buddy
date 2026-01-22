@@ -1,7 +1,5 @@
 {
   "description": "My OPCO - Consultoria Inteligente e RAG de documentos",
-  "requestFramePermissions": [
-    "camera"
-  ],
+  "requestFramePermissions": [],
   "name": "My OPCO"
 }

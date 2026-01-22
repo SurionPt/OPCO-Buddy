@@ -19,8 +19,7 @@
     "xlsx": "^0.18.5",
     "remark-gfm": "^4.0.1",
     "mammoth": "^1.11.0",
-    "docx": "^9.5.1",
-    "pptxgenjs": "^4.0.1"
+    "docx": "^9.5.1"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",
