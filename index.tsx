@@ -180,38 +180,41 @@ const runExportToPDF = (content: string, chartData: ChartData | null) => {
     
     tableRows.forEach((row, rowIndex) => {
       // Check for page overflow
-      if (y > pageHeight - 30) {
+      if (y > pageHeight - 35) {
         doc.addPage();
         drawHeaderFooter(doc.getNumberOfPages());
         y = 30;
       }
 
+      // Calculate max height for this row
+      let maxHeight = 6;
+      if (rowIndex === 0) doc.setFontSize(7.5); else doc.setFontSize(8.5);
+
+      row.forEach((cell) => {
+        const textLines = doc.splitTextToSize(cell, colWidth - 4);
+        maxHeight = Math.max(maxHeight, textLines.length * 5);
+      });
+
       if (rowIndex === 0) {
-        // Header styling
-        doc.setFillColor(240, 240, 240);
-        doc.rect(margin, y - 5, contentWidth, 8, 'F');
+        // Header background
+        doc.setFillColor(248, 248, 248);
+        doc.rect(margin, y - 5, contentWidth, maxHeight + 4, 'F');
         doc.setFont("helvetica", "bold");
-        doc.setTextColor(dark[0], dark[1], dark[2]);
+        doc.setTextColor(red[0], red[1], red[2]);
       } else {
         doc.setFont("helvetica", "normal");
         doc.setTextColor(45, 55, 72);
       }
-
-      let maxHeight = 0;
-      row.forEach((cell, colIndex) => {
-        const textLines = doc.splitTextToSize(cell, colWidth - 4);
-        maxHeight = Math.max(maxHeight, textLines.length * 5);
-      });
 
       row.forEach((cell, colIndex) => {
         const textLines = doc.splitTextToSize(cell, colWidth - 4);
         doc.text(textLines, margin + (colIndex * colWidth) + 2, y);
       });
 
-      // Draw bottom line
-      doc.setDrawColor(230, 230, 230);
+      // Horizontal separator line
+      doc.setDrawColor(235, 235, 235);
       doc.setLineWidth(0.1);
-      doc.line(margin, y + 2, pageWidth - margin, y + 2);
+      doc.line(margin, y + maxHeight - 2, pageWidth - margin, y + maxHeight - 2);
 
       y += maxHeight + 2;
     });
@@ -219,10 +222,11 @@ const runExportToPDF = (content: string, chartData: ChartData | null) => {
     tableRows = [];
     inTable = false;
     y += 5;
+    doc.setFontSize(10); // Restore normal font size
   };
 
   lines.forEach((line) => {
-    const isTableRow = line.includes('|');
+    const isTableRow = line.trim().startsWith('|') && line.trim().endsWith('|');
     const isDivider = line.match(/^[:\s-|\d]+$/);
 
     if (isTableRow && !isDivider) {
@@ -231,16 +235,20 @@ const runExportToPDF = (content: string, chartData: ChartData | null) => {
         tableRows.push(cells);
         inTable = true;
       }
-    } else if (inTable && !isTableRow) {
+    } else if (inTable && !isTableRow && !isDivider) {
       flushTable();
-    } else if (!isTableRow) {
-      if (y > pageHeight - 30) { doc.addPage(); drawHeaderFooter(doc.getNumberOfPages()); y = 30; }
-      
+    } else if (!isTableRow && !isDivider) {
       const cleanLine = cleanMarkdownForPDF(line);
       if (!cleanLine) return;
 
+      if (y > pageHeight - 20) {
+        doc.addPage();
+        drawHeaderFooter(doc.getNumberOfPages());
+        y = 30;
+      }
+
       doc.setFont("helvetica", "normal");
-      doc.setFontSize(10.5);
+      doc.setFontSize(10);
       doc.setTextColor(45, 55, 72);
       const wrappedLines = doc.splitTextToSize(cleanLine, contentWidth);
       wrappedLines.forEach((wLine: string) => {
@@ -254,7 +262,7 @@ const runExportToPDF = (content: string, chartData: ChartData | null) => {
 
   if (inTable) flushTable();
 
-  doc.save(`Relatorio_Executivo_OPCO_${Date.now()}.pdf`);
+  doc.save(`Relatorio_OPCO_${Date.now()}.pdf`);
 };
 
 const runExportToExcel = (content: string) => {
@@ -269,8 +277,8 @@ const runExportToExcel = (content: string) => {
 
     const ws = XLSX.utils.aoa_to_sheet(rows);
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Extração OPCO");
-    XLSX.writeFile(wb, `Extracao_OPCO_${Date.now()}.xlsx`);
+    XLSX.utils.book_append_sheet(wb, ws, "Dados_OPCO");
+    XLSX.writeFile(wb, `Dados_OPCO_${Date.now()}.xlsx`);
   } catch (error) {
     console.error("Erro ao exportar Excel:", error);
   }
@@ -293,12 +301,12 @@ const MarkdownComponents = (isDark: boolean) => ({
     </thead>
   ),
   th: ({ children }: any) => (
-    <th className={`px-2 py-1 font-bold uppercase tracking-wider border-r last:border-r-0 ${isDark ? 'text-slate-400 border-slate-700' : 'text-slate-600 border-slate-200'}`}>
+    <th className={`px-2 py-1.5 font-bold uppercase tracking-wider border-r last:border-r-0 ${isDark ? 'text-slate-400 border-slate-700' : 'text-slate-600 border-slate-200'}`}>
       {children}
     </th>
   ),
   td: ({ children }: any) => (
-    <td className={`px-2 py-1 border-r last:border-r-0 align-top ${isDark ? 'text-slate-300 border-slate-800/50' : 'text-slate-700 border-slate-100'}`}>
+    <td className={`px-2 py-1.5 border-r last:border-r-0 align-top ${isDark ? 'text-slate-300 border-slate-800/50' : 'text-slate-700 border-slate-100'}`}>
       {children}
     </td>
   ),
@@ -308,7 +316,7 @@ const MarkdownComponents = (isDark: boolean) => ({
     </tr>
   ),
   p: ({ children }: any) => (
-    <p className="mb-1.5 last:mb-0 leading-normal">{children}</p>
+    <p className="mb-2 last:mb-0 leading-normal">{children}</p>
   ),
   code: ({ children, inline }: any) => (
     inline 
@@ -317,29 +325,18 @@ const MarkdownComponents = (isDark: boolean) => ({
   )
 });
 
-// --- Swipe Logic Helper ---
 const useSwipeReply = (onSwipe: () => void) => {
   const touchStartX = useRef(0);
   const touchEndX = useRef(0);
   const swipeThreshold = 50;
 
-  const handleTouchStart = (e: React.TouchEvent) => {
-    touchStartX.current = e.targetTouches[0].clientX;
-  };
-
-  const handleTouchMove = (e: React.TouchEvent) => {
-    touchEndX.current = e.targetTouches[0].clientX;
-  };
-
+  const handleTouchStart = (e: React.TouchEvent) => { touchStartX.current = e.targetTouches[0].clientX; };
+  const handleTouchMove = (e: React.TouchEvent) => { touchEndX.current = e.targetTouches[0].clientX; };
   const handleTouchEnd = () => {
     const diff = touchEndX.current - touchStartX.current;
-    if (diff > swipeThreshold && touchEndX.current !== 0) { 
-      onSwipe();
-    }
-    touchStartX.current = 0;
-    touchEndX.current = 0;
+    if (diff > swipeThreshold && touchEndX.current !== 0) { onSwipe(); }
+    touchStartX.current = 0; touchEndX.current = 0;
   };
-
   return { onTouchStart: handleTouchStart, onTouchMove: handleTouchMove, onTouchEnd: handleTouchEnd };
 };
 
@@ -371,10 +368,10 @@ const App = () => {
   };
 
   const createNewChat = () => {
-    const id = Date.now().toString();
+    const id = Date.now().toString() + Math.random().toString(36).substring(7);
     const newChat: Chat = {
       id, title: "NOVA ANÁLISE",
-      messages: [{ id: '1', role: 'assistant', content: "Olá, sou o **My OPCO**. Carregue ou selecione documentos e inicie a sua consulta estratégica.", timestamp: new Date().toISOString() }],
+      messages: [{ id: 'init-1', role: 'assistant', content: "Olá, sou o **My OPCO**. Carregue ou selecione documentos e inicie a sua consulta estratégica.", timestamp: new Date().toISOString() }],
       createdAt: new Date().toISOString()
     };
     setChats(prev => [newChat, ...prev]);
@@ -387,11 +384,8 @@ const App = () => {
     const newChats = chats.filter(c => c.id !== id);
     setChats(newChats);
     if (activeChatId === id) {
-      if (newChats.length > 0) {
-        setActiveChatId(newChats[0].id);
-      } else {
-        createNewChat();
-      }
+      if (newChats.length > 0) setActiveChatId(newChats[0].id);
+      else createNewChat();
     }
     addToast("Análise apagada", "info");
   };
@@ -405,8 +399,7 @@ const App = () => {
         if (parsed.length > 0) setActiveChatId(parsed[0].id);
         else createNewChat();
       } catch (e) { createNewChat(); } 
-    }
-    else createNewChat();
+    } else createNewChat();
   }, []);
 
   useEffect(() => { localStorage.setItem(STORAGE_KEY, JSON.stringify(chats)); }, [chats]);
@@ -418,7 +411,6 @@ const App = () => {
   const handlePasteAction = useCallback((e: ClipboardEvent | React.ClipboardEvent) => {
     const clipboardData = (e as any).clipboardData || (e as any).nativeEvent?.clipboardData;
     if (!clipboardData) return;
-    
     const items = clipboardData.items;
     for (let i = 0; i < items.length; i++) {
       if (items[i].kind === 'file' && items[i].type.startsWith('image/')) {
@@ -442,10 +434,7 @@ const App = () => {
   useEffect(() => {
     const handleGlobalPaste = (e: ClipboardEvent) => {
       const target = e.target as HTMLElement;
-      const isInput = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA';
-      if (!isInput || target === promptRef.current) {
-        handlePasteAction(e);
-      }
+      if (target.tagName !== 'INPUT' && target.tagName !== 'TEXTAREA' || target === promptRef.current) handlePasteAction(e);
     };
     window.addEventListener('paste', handleGlobalPaste);
     return () => window.removeEventListener('paste', handleGlobalPaste);
@@ -456,42 +445,18 @@ const App = () => {
     if (!files || files.length === 0) return;
     setIsUploading(true);
     const newDocs: Document[] = [];
-    
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
       try {
-        let content = '';
-        let visualPages: { data: string, mimeType: string }[] = [];
+        let content = ''; let visualPages: { data: string, mimeType: string }[] = [];
         const ext = file.name.toLowerCase();
-
-        if (ext.endsWith('.pdf')) {
-          const result = await processPdfWithVision(file);
-          content = result.text;
-          visualPages = result.visualPages;
-        } else if (ext.endsWith('.docx')) {
-          const ab = await file.arrayBuffer();
-          content = (await mammoth.extractRawText({ arrayBuffer: ab })).value;
-        } else if (ext.endsWith('.xlsx') || ext.endsWith('.xls')) {
-          const ab = await file.arrayBuffer();
-          const wb = XLSX.read(ab);
-          content = wb.SheetNames.map(sn => XLSX.utils.sheet_to_txt(wb.Sheets[sn])).join('\n');
-        } else {
-          content = await file.text();
-        }
-
-        newDocs.push({
-          id: Date.now() + '-' + i,
-          name: file.name,
-          content,
-          size: (file.size / 1024).toFixed(1) + ' KB',
-          type: file.type,
-          visualPages
-        });
-      } catch (err) {
-        addToast(`Erro em ${file.name}`, 'error');
-      }
+        if (ext.endsWith('.pdf')) { const r = await processPdfWithVision(file); content = r.text; visualPages = r.visualPages; }
+        else if (ext.endsWith('.docx')) { const ab = await file.arrayBuffer(); content = (await mammoth.extractRawText({ arrayBuffer: ab })).value; }
+        else if (ext.endsWith('.xlsx') || ext.endsWith('.xls')) { const ab = await file.arrayBuffer(); const wb = XLSX.read(ab); content = wb.SheetNames.map(sn => XLSX.utils.sheet_to_txt(wb.Sheets[sn])).join('\n'); }
+        else content = await file.text();
+        newDocs.push({ id: Date.now() + '-' + i, name: file.name, content, size: (file.size / 1024).toFixed(1) + ' KB', type: file.type, visualPages });
+      } catch (err) { addToast(`Erro em ${file.name}`, 'error'); }
     }
-    
     setDocuments(prev => [...prev, ...newDocs]);
     setSelectedDocIds(prev => [...prev, ...newDocs.map(d => d.id)]);
     setIsUploading(false);
@@ -507,43 +472,32 @@ const App = () => {
 
   const handleSendMessage = async () => {
     if ((!input.trim() && !pastedImage) || isTyping || !activeChatId) return;
+    const controller = new AbortController(); abortControllerRef.current = controller;
     
-    const controller = new AbortController();
-    abortControllerRef.current = controller;
-    
-    const userMsgId = Date.now().toString() + '-user-' + Math.floor(Math.random() * 1000);
+    // Robust unique IDs for user and assistant
+    const uniqueSuffix = Math.random().toString(36).substring(2, 8);
+    const userMsgId = `${Date.now()}-usr-${uniqueSuffix}`;
+    const assistantMsgId = `${Date.now() + 1}-ast-${uniqueSuffix}`;
+
     const userMsg: Message = { 
-      id: userMsgId, 
-      role: 'user', 
-      content: input, 
-      timestamp: new Date().toISOString(),
+      id: userMsgId, role: 'user', content: input, timestamp: new Date().toISOString(),
       replyTo: replyingTo ? { id: replyingTo.id, content: replyingTo.content, role: replyingTo.role } : undefined,
       image: pastedImage || undefined
     };
     
     setChats(prev => prev.map(c => c.id === activeChatId ? { ...c, title: c.title === "NOVA ANÁLISE" ? input.slice(0, 30).toUpperCase() : c.title, messages: [...c.messages, userMsg] } : c));
-    const currentInput = input;
-    const currentImage = pastedImage;
+    const currentInput = input; const currentImage = pastedImage;
     setInput(''); setIsTyping(true); setReplyingTo(null); setPastedImage(null);
 
-    const assistantMsgId = Date.now().toString() + '-asst-' + Math.floor(Math.random() * 1000);
-    const assistantMsg: Message = { 
-      id: assistantMsgId, 
-      role: 'assistant', 
-      content: "", 
-      timestamp: new Date().toISOString()
-    };
-    setChats(prev => prev.map(c => c.id === activeChatId ? { ...c, messages: [...c.messages, assistantMsg] } : c));
+    const assistantPlaceholder: Message = { id: assistantMsgId, role: 'assistant', content: "", timestamp: new Date().toISOString() };
+    setChats(prev => prev.map(c => c.id === activeChatId ? { ...c, messages: [...c.messages, assistantPlaceholder] } : c));
 
     try {
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
       const contextDocs = documents.filter(d => selectedDocIds.includes(d.id));
       const history = (activeChat?.messages || []).slice(-15).map(m => ({
         role: m.role === 'assistant' ? 'model' : 'user',
-        parts: [
-          ...(m.image ? [{ inlineData: { data: m.image.data, mimeType: m.image.mimeType } }] : []),
-          { text: (m.replyTo ? `[RESPONDENDO A: "${m.replyTo.content.slice(0, 100)}..."]\n` : "") + m.content }
-        ]
+        parts: [...(m.image ? [{ inlineData: { data: m.image.data, mimeType: m.image.mimeType } }] : []), { text: (m.replyTo ? `[RESPONDENDO A: "${m.replyTo.content.slice(0, 50)}..."]\n` : "") + m.content }]
       }));
 
       const currentTurnParts: any[] = [];
@@ -551,22 +505,21 @@ const App = () => {
         if (d.visualPages) d.visualPages.forEach(vp => currentTurnParts.push({ inlineData: { data: vp.data, mimeType: vp.mimeType } }));
         currentTurnParts.push({ text: `[CONHECIMENTO OPCO: ${d.name}]\n${d.content}` });
       });
-      if (userMsg.replyTo) currentTurnParts.push({ text: `[USUÁRIO RESPONDEU À: "${userMsg.replyTo.content}"]` });
+      if (userMsg.replyTo) currentTurnParts.push({ text: `[USUÁRIO RESPONDEU À MENSAGEM ANTERIOR]` });
       if (currentImage) currentTurnParts.push({ inlineData: { data: currentImage.data, mimeType: currentImage.mimeType } });
-      currentTurnParts.push({ text: currentInput || "Analise o contexto visual." });
+      currentTurnParts.push({ text: currentInput || "Analise a imagem enviada." });
 
       const result = await ai.models.generateContent({
         model: 'gemini-3-flash-preview',
         contents: [...history, { role: 'user', parts: currentTurnParts }],
         config: {
-          systemInstruction: "És o MY OPCO, Consultor de Inteligência da OPCO. Quando questionado sobre a OPCO, utiliza prioritariamente informações do site oficial https://opco.pt/ através da ferramenta de pesquisa e complementa com dados relevantes da internet. Responde sempre em Português de Portugal. Remove qualquer referência a 'OPCO Digital Systems' das tuas respostas. Use Markdown executivo. Se houver comandos [PDF_REPORT_READY] ou [EXCEL_READY], inclua-os no final.",
+          systemInstruction: "És o MY OPCO, Consultor de Inteligência da OPCO. Quando questionado sobre a OPCO, utiliza prioritariamente informações de https://opco.pt/ e documentos anexados. Responde sempre em Português de Portugal. Remove qualquer referência a 'OPCO Digital Systems'. Use Markdown profissional com tabelas estruturadas. Se estiveres no modo DOCS (sem pesquisa web ativa) e o utilizador fizer perguntas triviais, sobre eventos atuais ou tempo real (como 'que dia é hoje'), responde educadamente que não consegues obter essa informação por estares apenas em modo DOCS e não inventes respostas. Se houver análise comparativa, gere tabelas claras.",
           tools: searchMode === 'hybrid' ? [{ googleSearch: {} }] : []
         }
       });
 
       let fullResponse = result.text || "";
       let grounding: GroundingChunk[] = result.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
-
       let autoDoc: 'pdf' | 'excel' | undefined = undefined;
       if (fullResponse.includes("[PDF_REPORT_READY]")) { autoDoc = 'pdf'; fullResponse = fullResponse.replace("[PDF_REPORT_READY]", "").trim(); }
       if (fullResponse.includes("[EXCEL_READY]")) { autoDoc = 'excel'; fullResponse = fullResponse.replace("[EXCEL_READY]", "").trim(); }
@@ -577,96 +530,58 @@ const App = () => {
       } : c));
 
     } catch (e: any) {
-      if (e.name !== 'AbortError') addToast("Falha na Rede OPCO", "error");
-    } finally { 
-      setIsTyping(false); 
-      abortControllerRef.current = null;
-    }
+      if (e.name !== 'AbortError') addToast("Erro na ligação OPCO", "error");
+    } finally { setIsTyping(false); abortControllerRef.current = null; }
   };
 
-  const handleStop = () => {
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-      setIsTyping(false);
-      addToast("Interrompido pelo utilizador", "info");
-    }
-  };
+  const handleStop = () => { if (abortControllerRef.current) { abortControllerRef.current.abort(); setIsTyping(false); addToast("Interrompido", "info"); } };
 
   const MessageBubble = ({ msg }: { msg: Message }) => {
     const isUser = msg.role === 'user';
-    const swipeHandlers = useSwipeReply(() => {
-      setReplyingTo(msg);
-      promptRef.current?.focus();
-    });
-
-    const copyToClipboard = () => {
-      navigator.clipboard.writeText(msg.content);
-      addToast("Copiado!", "success");
-    };
+    const swipeHandlers = useSwipeReply(() => { setReplyingTo(msg); promptRef.current?.focus(); });
+    const copyToClipboard = () => { navigator.clipboard.writeText(msg.content); addToast("Copiado!", "success"); };
 
     return (
-      <div 
-        {...swipeHandlers}
-        className={`flex flex-col mb-4 w-full group/msg relative transition-all duration-300 ${isUser ? 'items-end' : 'items-start'}`}
-      >
-        <div className={`flex flex-col max-w-[88%] md:max-w-[75%] ${isUser ? 'items-end' : 'items-start'}`}>
+      <div {...swipeHandlers} className={`flex flex-col mb-5 w-full group/msg relative transition-all duration-300 ${isUser ? 'items-end' : 'items-start'}`}>
+        <div className={`flex flex-col max-w-[85%] md:max-w-[70%] ${isUser ? 'items-end' : 'items-start'}`}>
           {msg.replyTo && (
-            <div className={`mb-0.5 px-2 py-1 rounded-t-lg text-[8px] border-x border-t ${isDark ? 'bg-slate-800/40 border-slate-700 text-slate-400' : 'bg-slate-100 border-slate-200 text-slate-500'} flex items-center gap-1.5 opacity-80 max-w-full truncate`}>
-              <ReplyIcon size={9} className="text-[#ca0607]" />
-              <span className="truncate italic">"{msg.replyTo.content.slice(0, 50)}..."</span>
+            <div className={`mb-0.5 px-3 py-1 rounded-t-xl text-[7px] border-x border-t ${isDark ? 'bg-slate-800/40 border-slate-700 text-slate-400' : 'bg-slate-100 border-slate-200 text-slate-500'} flex items-center gap-1.5 opacity-80 max-w-full truncate italic`}>
+              <ReplyIcon size={8} className="text-[#ca0607]" /> "{msg.replyTo.content.slice(0, 40)}..."
             </div>
           )}
-
-          <div className={`relative px-3 py-2 rounded-2xl shadow-sm border transition-all inline-block w-auto min-w-[60px] ${
-            isUser 
-              ? (isDark ? 'bg-[#ca0607] border-transparent text-white rounded-tr-none' : 'bg-[#0f172a] border-transparent text-white rounded-tr-none') 
-              : (isDark ? 'bg-slate-900 border-slate-800 text-slate-100 rounded-tl-none' : 'bg-white border-slate-200 text-slate-800 rounded-tl-none')
+          <div className={`relative px-4 py-3 rounded-2xl shadow-sm border transition-all inline-block w-auto min-w-[60px] ${
+            isUser ? (isDark ? 'bg-[#ca0607] border-transparent text-white rounded-tr-none' : 'bg-[#0f172a] border-transparent text-white rounded-tr-none') 
+                   : (isDark ? 'bg-slate-900 border-slate-800 text-slate-100 rounded-tl-none' : 'bg-white border-slate-200 text-slate-800 rounded-tl-none')
           }`}>
             {msg.image && (
-              <div className="mb-2 rounded-lg overflow-hidden border border-white/5 max-w-full">
-                <img src={`data:${msg.image.mimeType};base64,${msg.image.data}`} className="w-full max-h-[220px] object-contain" alt="Pasted" />
+              <div className="mb-3 rounded-lg overflow-hidden border border-white/10 max-w-full">
+                <img src={`data:${msg.image.mimeType};base64,${msg.image.data}`} className="w-full max-h-[250px] object-contain" alt="Pasted" />
               </div>
             )}
-            
-            <div className={`prose prose-invert max-w-none text-[10.5px] leading-tight ${isDark ? '' : (isUser ? '' : 'prose-slate text-slate-800')}`}>
+            <div className={`prose prose-invert max-w-none text-[10px] leading-relaxed ${isDark ? '' : (isUser ? '' : 'prose-slate text-slate-800')}`}>
               <ReactMarkdown remarkPlugins={[remarkGfm]} components={MarkdownComponents(isDark)}>{msg.content}</ReactMarkdown>
             </div>
-
             {msg.sources && msg.sources.length > 0 && (
-              <div className="mt-3 flex flex-wrap gap-1.5 border-t border-slate-700/30 pt-2">
-                <span className="text-[7px] font-bold uppercase opacity-40 w-full mb-0.5">Fontes:</span>
+              <div className="mt-4 flex flex-wrap gap-2 border-t border-slate-700/20 pt-3">
+                <span className="text-[7px] font-bold uppercase opacity-50 w-full mb-1">Referências Web:</span>
                 {msg.sources.map((src, i) => src.web && (
-                  <a 
-                    key={i} 
-                    href={src.web.uri} 
-                    target="_blank" 
-                    rel="noopener noreferrer"
-                    className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[7px] font-bold truncate max-w-[120px] transition-colors ${isDark ? 'bg-slate-800 text-slate-400 hover:bg-slate-700' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
-                  >
-                    <ExternalLink size={8} /> {src.web.title || 'Referência'}
+                  <a key={i} href={src.web.uri} target="_blank" rel="noopener noreferrer" className={`flex items-center gap-1.5 px-2 py-1 rounded-lg text-[7px] font-bold truncate max-w-[150px] transition-colors ${isDark ? 'bg-slate-800 text-slate-400 hover:bg-slate-700' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}>
+                    <ExternalLink size={8} /> {src.web.title || 'Link'}
                   </a>
                 ))}
               </div>
             )}
-
             {msg.autoDocument && (
-              <div className={`mt-2 p-1.5 rounded-xl border flex items-center justify-between gap-3 ${isDark ? 'bg-slate-950/50 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
-                <div className="flex items-center gap-1.5">
-                  <FileDown size={12} className="text-[#ca0607]" />
-                  <span className="text-[8px] font-bold uppercase">Relatório</span>
-                </div>
-                <button onClick={() => msg.autoDocument === 'pdf' ? runExportToPDF(msg.content, null) : runExportToExcel(msg.content)} className="px-2 py-0.5 bg-[#ca0607] text-white text-[8px] font-bold rounded-lg hover:bg-red-700 transition-colors">Download</button>
+              <div className={`mt-3 p-2 rounded-xl border flex items-center justify-between gap-4 ${isDark ? 'bg-slate-950/50 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
+                <div className="flex items-center gap-2"><FileDown size={14} className="text-[#ca0607]" /><span className="text-[8px] font-bold uppercase">Relatório Estratégico</span></div>
+                <button onClick={() => msg.autoDocument === 'pdf' ? runExportToPDF(msg.content, null) : runExportToExcel(msg.content)} className="px-3 py-1 bg-[#ca0607] text-white text-[8px] font-bold rounded-lg hover:bg-red-700 transition-colors">Baixar</button>
               </div>
             )}
-
-            <div className={`absolute top-0 ${isUser ? '-left-12' : '-right-12'} opacity-0 group-hover/msg:opacity-100 transition-opacity flex flex-col gap-1 hidden md:flex`}>
-              <button onClick={copyToClipboard} className="p-1 rounded-full bg-slate-800 text-slate-300 hover:text-white border border-slate-700"><Copy size={11}/></button>
-              <button onClick={() => { setReplyingTo(msg); promptRef.current?.focus(); }} className="p-1 rounded-full bg-[#ca0607] text-white"><ReplyIcon size={11}/></button>
+            <div className={`absolute top-0 ${isUser ? '-left-12' : '-right-12'} opacity-0 group-hover/msg:opacity-100 transition-opacity flex flex-col gap-2 hidden md:flex`}>
+              <button onClick={copyToClipboard} className="p-1.5 rounded-full bg-slate-800 text-slate-300 hover:text-white border border-slate-700"><Copy size={12}/></button>
+              <button onClick={() => { setReplyingTo(msg); promptRef.current?.focus(); }} className="p-1.5 rounded-full bg-[#ca0607] text-white"><ReplyIcon size={12}/></button>
             </div>
-            
-            <div className="flex justify-end mt-1 opacity-30 text-[7px] font-medium">
-              {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-            </div>
+            <div className="flex justify-end mt-1.5 opacity-30 text-[7px] font-medium">{new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
           </div>
         </div>
       </div>
@@ -675,195 +590,116 @@ const App = () => {
 
   return (
     <div className={`flex h-screen overflow-hidden transition-colors duration-500 ${isDark ? 'bg-slate-950 text-white dark' : 'bg-[#f8fafc] text-slate-900'}`}>
-      
-      {/* Sidebar */}
-      <aside className={`fixed inset-y-0 left-0 z-50 w-60 bg-[#0f172a] border-r border-slate-800 transition-transform md:relative md:translate-x-0 ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full shadow-2xl'}`}>
-        <div className="absolute inset-0 pointer-events-none opacity-[0.03] z-0">
-          <img src={NEURAL_BG_URL} className="w-full h-full object-cover grayscale" alt="Neural" />
-        </div>
+      <aside className={`fixed inset-y-0 left-0 z-50 w-64 bg-[#0f172a] border-r border-slate-800 transition-transform md:relative md:translate-x-0 ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full shadow-2xl'}`}>
+        <div className="absolute inset-0 pointer-events-none opacity-[0.03] z-0"><img src={NEURAL_BG_URL} className="w-full h-full object-cover grayscale" alt="Neural" /></div>
         <div className="relative z-10 flex flex-col h-full">
-          <div className="p-4 border-b border-slate-800/50 flex items-center gap-2.5 bg-slate-900/30 backdrop-blur-md">
-            <img src={SPHERE_LOGO_URL} className="w-4 h-4 object-contain" alt="Sphere" />
-            <span className="font-bold text-[9px] uppercase tracking-widest text-white">MY OPCO</span>
+          <div className="p-5 border-b border-slate-800/50 flex items-center gap-3 bg-slate-900/30 backdrop-blur-md">
+            <img src={SPHERE_LOGO_URL} className="w-5 h-5 object-contain" alt="Sphere" />
+            <span className="font-bold text-[10px] uppercase tracking-widest text-white">MY OPCO INTEL</span>
           </div>
-          
           <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">
-            <button onClick={createNewChat} className="w-full py-2 bg-[#ca0607] rounded-xl text-white text-[8px] font-bold uppercase tracking-widest flex items-center justify-center gap-2 shadow-lg hover:bg-red-700 transition-all mb-6 active:scale-95 group">
-              <Plus size={12} strokeWidth={3} className="group-hover:rotate-90 transition-transform" /> NOVA ANÁLISE
+            <button onClick={createNewChat} className="w-full py-2.5 bg-[#ca0607] rounded-xl text-white text-[9px] font-bold uppercase tracking-widest flex items-center justify-center gap-2 shadow-lg hover:bg-red-700 transition-all mb-6 active:scale-95 group">
+              <Plus size={14} strokeWidth={3} className="group-hover:rotate-90 transition-transform" /> NOVA ANÁLISE
             </button>
-            <div className="space-y-2">
-              <p className="text-[6px] font-bold text-slate-500 uppercase tracking-widest px-1 mb-1.5">Recentes</p>
+            <div className="space-y-1.5">
+              <p className="text-[7px] font-bold text-slate-500 uppercase tracking-widest px-1 mb-2">Histórico</p>
               {chats.map(chat => (
-                <div key={chat.id} className="group relative flex items-center mb-1 last:mb-0">
-                  <button 
-                    onClick={() => { setActiveChatId(chat.id); setIsSidebarOpen(false); }} 
-                    className={`w-full p-2.5 pr-8 rounded-lg text-left text-[8px] font-semibold border transition-all truncate block uppercase tracking-tight ${activeChatId === chat.id ? 'bg-[#ca0607] border-red-500 text-white shadow-md' : 'bg-slate-800/40 border-slate-700/50 text-slate-400 hover:bg-slate-800/80 hover:text-slate-200'}`}
-                  >
-                    {chat.title}
-                  </button>
-                  <button 
-                    onClick={(e) => deleteChat(chat.id, e)} 
-                    className="absolute right-2 opacity-0 group-hover:opacity-100 p-1 rounded-md hover:bg-black/20 text-white/40 hover:text-white transition-all z-10"
-                    title="Apagar Análise"
-                  >
-                    <Trash2 size={10} />
-                  </button>
+                <div key={chat.id} className="group relative flex items-center mb-1">
+                  <button onClick={() => { setActiveChatId(chat.id); setIsSidebarOpen(false); }} className={`w-full p-2.5 pr-9 rounded-xl text-left text-[9px] font-semibold border transition-all truncate block uppercase tracking-tight ${activeChatId === chat.id ? 'bg-[#ca0607] border-red-500 text-white shadow-md' : 'bg-slate-800/40 border-slate-700/50 text-slate-400 hover:bg-slate-800/80'}`}>{chat.title}</button>
+                  <button onClick={(e) => deleteChat(chat.id, e)} className="absolute right-2 opacity-0 group-hover:opacity-100 p-1.5 rounded-lg hover:bg-black/30 text-white/50 hover:text-white transition-all"><Trash2 size={11}/></button>
                 </div>
               ))}
             </div>
-
             {documents.length > 0 && (
-              <div className="mt-6 space-y-2">
-                <p className="text-[6px] font-bold text-slate-500 uppercase tracking-widest px-1 mb-1.5">Conhecimento</p>
+              <div className="mt-8 space-y-2">
+                <p className="text-[7px] font-bold text-slate-500 uppercase tracking-widest px-1 mb-2">Base de Conhecimento</p>
                 {documents.map(doc => (
-                  <div 
-                    key={doc.id}
-                    onClick={() => setSelectedDocIds(prev => prev.includes(doc.id) ? prev.filter(id => id !== doc.id) : [...prev, doc.id])}
-                    className={`group w-full p-2 rounded-lg border transition-all flex items-center justify-between cursor-pointer ${selectedDocIds.includes(doc.id) ? 'bg-[#ca0607]/10 border-[#ca0607]/30 text-white' : 'bg-slate-800/20 border-slate-700/50 text-slate-400'}`}
-                  >
-                    <div className="flex items-center gap-1.5 overflow-hidden">
-                      <FileTextIcon size={10} className={selectedDocIds.includes(doc.id) ? 'text-[#ca0607]' : 'text-slate-500'} />
-                      <span className="text-[7px] font-bold truncate uppercase">{doc.name}</span>
-                    </div>
-                    <button onClick={(e) => removeDocument(doc.id, e)} className="opacity-0 group-hover:opacity-100 p-1 hover:bg-red-500/20 rounded text-slate-500 hover:text-red-500"><Trash2 size={9} /></button>
+                  <div key={doc.id} onClick={() => setSelectedDocIds(prev => prev.includes(doc.id) ? prev.filter(id => id !== doc.id) : [...prev, doc.id])} className={`group w-full p-2.5 rounded-xl border transition-all flex items-center justify-between cursor-pointer ${selectedDocIds.includes(doc.id) ? 'bg-[#ca0607]/10 border-[#ca0607]/40 text-white' : 'bg-slate-800/20 border-slate-700/50 text-slate-500'}`}>
+                    <div className="flex items-center gap-2 overflow-hidden"><FileTextIcon size={12} className={selectedDocIds.includes(doc.id) ? 'text-[#ca0607]' : 'text-slate-600'} /><span className="text-[8px] font-bold truncate uppercase">{doc.name}</span></div>
+                    <button onClick={(e) => removeDocument(doc.id, e)} className="opacity-0 group-hover:opacity-100 p-1 hover:bg-red-500/20 rounded text-slate-600 hover:text-red-500"><Trash2 size={10}/></button>
                   </div>
                 ))}
               </div>
             )}
           </div>
-
-          <div className="p-4 border-t border-slate-800/50 bg-slate-900/40">
-             <input type="file" ref={fileInputRef} className="hidden" multiple onChange={handleFileUpload} />
-             <button onClick={() => fileInputRef.current?.click()} className="w-full py-2 bg-slate-800 text-white rounded-xl text-[8px] font-bold uppercase tracking-widest flex items-center justify-center gap-2 mb-2.5 hover:bg-slate-700 transition-all border border-slate-700">
-               {isUploading ? <Loader2 size={12} className="animate-spin text-[#ca0607]"/> : <UploadCloud size={12} className="text-[#ca0607]"/>} Arquivos
-             </button>
-             <div className="w-full">
-                <button onClick={() => setIsDark(!isDark)} className="w-full py-1.5 bg-slate-800/50 text-slate-400 text-[7px] font-bold rounded-lg uppercase flex items-center justify-center gap-1.5 hover:text-white transition-colors border border-slate-700/50">
-                  {isDark ? <Sun size={10}/> : <Moon size={10}/>} Modo
-                </button>
-             </div>
+          <div className="p-5 border-t border-slate-800/50 bg-slate-900/40">
+            <input type="file" ref={fileInputRef} className="hidden" multiple onChange={handleFileUpload} />
+            <button onClick={() => fileInputRef.current?.click()} className="w-full py-2.5 bg-slate-800 text-white rounded-xl text-[9px] font-bold uppercase tracking-widest flex items-center justify-center gap-2 mb-3 hover:bg-slate-700 transition-all border border-slate-700">
+              {isUploading ? <Loader2 size={14} className="animate-spin text-[#ca0607]"/> : <UploadCloud size={14} className="text-[#ca0607]"/>} CARREGAR FICHEIROS
+            </button>
+            <button onClick={() => setIsDark(!isDark)} className="w-full py-2 bg-slate-800/50 text-slate-400 text-[8px] font-bold rounded-lg uppercase flex items-center justify-center gap-2 hover:text-white transition-colors border border-slate-700/50">{isDark ? <Sun size={12}/> : <Moon size={12}/>} TEMA {isDark ? 'CLARO' : 'ESCURO'}</button>
           </div>
         </div>
       </aside>
-
       <main className="flex-1 flex flex-col relative overflow-hidden">
-        <header className={`h-12 border-b flex items-center justify-between px-5 sticky top-0 z-40 ${isDark ? 'bg-slate-950/90 border-slate-800' : 'bg-white/90 border-slate-200'} backdrop-blur-xl transition-all`}>
-           <div className="flex items-center gap-3">
-             <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="md:hidden p-2 text-slate-500"><Menu size={18}/></button>
-             <div className="flex items-center gap-1.5">
-               <div className="relative">
-                 <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full" />
-                 <div className="absolute inset-0 w-1.5 h-1.5 bg-emerald-500 rounded-full animate-ping opacity-30" />
-               </div>
-               <span className={`text-[8px] font-bold uppercase tracking-widest ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>OPCO Intel Network</span>
+        <header className={`h-14 border-b flex items-center justify-between px-6 sticky top-0 z-40 ${isDark ? 'bg-slate-950/90 border-slate-800' : 'bg-white/90 border-slate-200'} backdrop-blur-xl transition-all`}>
+           <div className="flex items-center gap-4">
+             <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="md:hidden p-2 text-slate-500"><Menu size={20}/></button>
+             <div className="flex items-center gap-2">
+               <div className="relative"><div className="w-2 h-2 bg-emerald-500 rounded-full" /><div className="absolute inset-0 w-2 h-2 bg-emerald-500 rounded-full animate-ping opacity-30" /></div>
+               <span className={`text-[9px] font-bold uppercase tracking-widest ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Rede Ativa OPCO</span>
              </div>
            </div>
-           <div className="flex items-center">
-              <img src={OPCO_LOGO_URL} className="h-8 w-auto" alt="OPCO" />
-           </div>
+           <div className="flex items-center"><img src={OPCO_LOGO_URL} className="h-10 w-auto" alt="OPCO" /></div>
         </header>
-
-        <div className="flex-1 overflow-y-auto p-3 sm:p-6 custom-scrollbar max-w-3xl mx-auto w-full">
+        <div className="flex-1 overflow-y-auto p-4 sm:p-8 custom-scrollbar max-w-4xl mx-auto w-full">
            {activeChat?.messages.map(msg => <MessageBubble key={msg.id} msg={msg} />)}
            {isTyping && (
-             <div className="flex items-center gap-1.5 text-[#ca0607] animate-pulse py-3 px-2">
-               <div className="flex gap-0.5">
-                 <div className="w-1 h-1 bg-[#ca0607] rounded-full animate-bounce" style={{animationDelay: '0ms'}} />
-                 <div className="w-1 h-1 bg-[#ca0607] rounded-full animate-bounce" style={{animationDelay: '150ms'}} />
-                 <div className="w-1 h-1 bg-[#ca0607] rounded-full animate-bounce" style={{animationDelay: '300ms'}} />
-               </div>
-               <span className="text-[7px] font-bold uppercase tracking-widest opacity-60">Consultando...</span>
+             <div className="flex items-center gap-2.5 text-[#ca0607] py-4 px-2">
+               <div className="flex gap-1"><div className="w-1.5 h-1.5 bg-[#ca0607] rounded-full animate-bounce" style={{animationDelay: '0ms'}} /><div className="w-1.5 h-1.5 bg-[#ca0607] rounded-full animate-bounce" style={{animationDelay: '150ms'}} /><div className="w-1.5 h-1.5 bg-[#ca0607] rounded-full animate-bounce" style={{animationDelay: '300ms'}} /></div>
+               <span className="text-[8px] font-bold uppercase tracking-widest opacity-60">Processando Análise...</span>
              </div>
            )}
-           <div ref={messagesEndRef} className="h-20" />
+           <div ref={messagesEndRef} className="h-24" />
         </div>
-
-        <div className={`p-3 sm:p-5 border-t ${isDark ? 'bg-slate-950/80 border-slate-800' : 'bg-white/80 border-slate-200'} backdrop-blur-2xl relative z-40`}>
-          <div className="max-w-2xl mx-auto relative">
-             
+        <div className={`p-4 sm:p-6 border-t ${isDark ? 'bg-slate-950/80 border-slate-800' : 'bg-white/80 border-slate-200'} backdrop-blur-2xl relative z-40`}>
+          <div className="max-w-3xl mx-auto relative">
              {pastedImage && (
-               <div className="absolute bottom-full left-0 mb-4 animate-in slide-in-from-bottom-2 z-50">
-                 <div className="relative group rounded-xl overflow-hidden border-2 border-[#ca0607] bg-white dark:bg-slate-900 p-1 shadow-2xl backdrop-blur-md">
-                    <img src={`data:${pastedImage.mimeType};base64,${pastedImage.data}`} className="w-20 h-20 object-cover rounded-lg" alt="Preview" />
-                    <button 
-                      onClick={() => setPastedImage(null)} 
-                      className="absolute -top-2 -right-2 bg-red-600 text-white p-1 rounded-full shadow-lg hover:bg-red-700 active:scale-90 transition-all border-2 border-white dark:border-slate-900"
-                      title="Remover Imagem"
-                    >
-                      <X size={12} strokeWidth={3} />
-                    </button>
+               <div className="absolute bottom-full left-0 mb-5 animate-in slide-in-from-bottom-2 z-50">
+                 <div className="relative group rounded-2xl overflow-hidden border-2 border-[#ca0607] bg-white dark:bg-slate-900 p-1.5 shadow-2xl backdrop-blur-md">
+                    <img src={`data:${pastedImage.mimeType};base64,${pastedImage.data}`} className="w-24 h-24 object-cover rounded-xl" alt="Preview" />
+                    <button onClick={() => setPastedImage(null)} className="absolute -top-3 -right-3 bg-red-600 text-white p-1.5 rounded-full shadow-lg hover:bg-red-700 active:scale-90 transition-all border-2 border-white dark:border-slate-900" title="Remover"><X size={14} strokeWidth={3} /></button>
                  </div>
                </div>
              )}
-
              {replyingTo && (
-               <div className="mb-2 px-3 py-1.5 bg-[#0f172a]/5 dark:bg-white/5 border-l-2 border-[#ca0607] flex items-center justify-between rounded-r-lg animate-in slide-in-from-bottom-2 backdrop-blur-md">
-                 <div className="text-[9px] font-medium opacity-80 truncate pr-3">
-                   <span className="font-bold text-[#ca0607] uppercase mr-1.5 tracking-widest text-[7px]">Resp:</span>
-                   {replyingTo.content.slice(0, 80)}...
-                 </div>
-                 <button onClick={() => setReplyingTo(null)} className="text-slate-400 p-1"><X size={12} /></button>
+               <div className="mb-3 px-4 py-2 bg-[#0f172a]/5 dark:bg-white/5 border-l-4 border-[#ca0607] flex items-center justify-between rounded-r-xl animate-in slide-in-from-bottom-2 backdrop-blur-md">
+                 <div className="text-[10px] font-medium opacity-80 truncate pr-4 text-slate-500"><span className="font-bold text-[#ca0607] uppercase mr-2 tracking-widest text-[8px]">Respondendo:</span>"{replyingTo.content.slice(0, 70)}..."</div>
+                 <button onClick={() => setReplyingTo(null)} className="text-slate-400 p-1 hover:text-red-500 transition-colors"><X size={14} /></button>
                </div>
              )}
-
-             <div className="flex items-center justify-center mb-3">
-                <div className={`p-0.5 rounded-lg border flex items-center gap-0.5 ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-slate-100 border-slate-300/50'}`}>
-                  <button onClick={() => setSearchMode('docs')} className={`px-4 py-1.5 rounded-md text-[8px] font-bold uppercase tracking-widest transition-all flex items-center gap-1 ${searchMode === 'docs' ? (isDark ? 'bg-slate-800 text-white shadow-sm' : 'bg-white text-slate-900 shadow-sm ring-1 ring-slate-200') : 'text-slate-500'}`}><Database size={10} /> Docs ({selectedDocIds.length})</button>
-                  <button onClick={() => setSearchMode('hybrid')} className={`px-4 py-1.5 rounded-md text-[8px] font-bold uppercase tracking-widest transition-all flex items-center gap-1 ${searchMode === 'hybrid' ? 'bg-[#ca0607] text-white shadow-sm' : 'text-slate-500'}`}><Globe size={10} /> Web</button>
+             <div className="flex items-center justify-center mb-4">
+                <div className={`p-1 rounded-xl border flex items-center gap-1 ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-slate-100 border-slate-200'}`}>
+                  <button onClick={() => setSearchMode('docs')} className={`px-5 py-2 rounded-lg text-[9px] font-bold uppercase tracking-widest transition-all flex items-center gap-2 ${searchMode === 'docs' ? (isDark ? 'bg-slate-800 text-white shadow-sm' : 'bg-white text-slate-900 shadow-sm ring-1 ring-slate-200') : 'text-slate-500 hover:text-slate-700'}`}><Database size={12} /> DOCS ({selectedDocIds.length})</button>
+                  <button onClick={() => setSearchMode('hybrid')} className={`px-5 py-2 rounded-lg text-[9px] font-bold uppercase tracking-widest transition-all flex items-center gap-2 ${searchMode === 'hybrid' ? 'bg-[#ca0607] text-white shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}><Globe size={12} /> DOCS + WEB</button>
                 </div>
              </div>
-
-             <div className={`flex flex-col border rounded-[22px] p-1.5 transition-all shadow-md ${isDark ? 'bg-slate-900 border-slate-800 focus-within:border-slate-700' : 'bg-white border-slate-200 focus-within:border-[#ca0607]/50'}`}>
-                <div className="flex items-center px-1.5">
-                   <button onClick={() => fileInputRef.current?.click()} className="w-8 h-8 flex-shrink-0 flex items-center justify-center text-slate-400 hover:text-[#ca0607] transition-all" title="Anexar"><Paperclip size={16} /></button>
-                   <textarea 
-                    ref={promptRef}
-                    value={input} 
-                    onChange={e => setInput(e.target.value)} 
-                    onPaste={handlePasteAction}
-                    placeholder="Sua pergunta estratégica..."
-                    className="flex-1 bg-transparent px-2 py-2 focus:outline-none resize-none text-[11px] font-medium placeholder:text-slate-400 max-h-[120px] custom-scrollbar"
-                    rows={1}
-                    onKeyDown={e => e.key === 'Enter' && !e.shiftKey && (e.preventDefault(), handleSendMessage())}
-                   />
-                   <div className="flex items-center pl-1.5">
-                      {isTyping ? (
-                        <button onClick={handleStop} className="w-8 h-8 flex items-center justify-center text-red-600 animate-pulse" title="Parar Resposta"><CircleStop size={22} strokeWidth={2.5} /></button>
-                      ) : (
-                        <button onClick={handleSendMessage} disabled={!input.trim() && !pastedImage} className={`w-8 h-8 rounded-full flex items-center justify-center transition-all active:scale-90 ${input.trim() || pastedImage ? 'bg-[#ca0607] text-white hover:bg-red-700' : 'bg-slate-200 text-slate-400'}`}>
-                          <Send size={14} strokeWidth={2.5} />
-                        </button>
-                      )}
+             <div className={`flex flex-col border rounded-[26px] p-2 transition-all shadow-lg ${isDark ? 'bg-slate-900 border-slate-800 focus-within:border-slate-700' : 'bg-white border-slate-200 focus-within:border-[#ca0607]/50'}`}>
+                <div className="flex items-center px-2">
+                   <button onClick={() => fileInputRef.current?.click()} className="w-10 h-10 flex-shrink-0 flex items-center justify-center text-slate-400 hover:text-[#ca0607] transition-all" title="Anexar"><Paperclip size={18} /></button>
+                   <textarea ref={promptRef} value={input} onChange={e => setInput(e.target.value)} onPaste={handlePasteAction} placeholder="Escreva a sua consulta estratégica..." className="flex-1 bg-transparent px-3 py-3 focus:outline-none resize-none text-[12px] font-medium placeholder:text-slate-400 max-h-[150px] custom-scrollbar" rows={1} onKeyDown={e => e.key === 'Enter' && !e.shiftKey && (e.preventDefault(), handleSendMessage())} />
+                   <div className="flex items-center pl-2">
+                      {isTyping ? <button onClick={handleStop} className="w-10 h-10 flex items-center justify-center text-red-600 animate-pulse"><CircleStop size={26} strokeWidth={2.5} /></button>
+                                : <button onClick={handleSendMessage} disabled={!input.trim() && !pastedImage} className={`w-10 h-10 rounded-full flex items-center justify-center transition-all active:scale-90 ${input.trim() || pastedImage ? 'bg-[#ca0607] text-white hover:bg-red-700' : 'bg-slate-200 text-slate-400'}`}><Send size={16} strokeWidth={2.5} /></button>}
                    </div>
                 </div>
              </div>
-             
-             <div className="mt-4 flex flex-wrap justify-center gap-x-8 gap-y-1 opacity-20 text-[7px] font-bold uppercase tracking-widest pointer-events-none select-none">
-                <div className="flex items-center gap-1"><MapPin size={8} className="text-[#ca0607]" /> Azeitão, PT</div>
-                <div className="flex items-center gap-1"><Phone size={8} className="text-[#ca0607]" /> +351 210 152 492</div>
-                <div className="flex items-center gap-1"><Mail size={8} className="text-[#ca0607]" /> geral@opco.pt</div>
+             <div className="mt-5 flex flex-wrap justify-center gap-x-10 gap-y-2 opacity-30 text-[8px] font-bold uppercase tracking-widest pointer-events-none select-none">
+                <div className="flex items-center gap-1.5"><MapPin size={9} className="text-[#ca0607]" /> Azeitão, PT</div>
+                <div className="flex items-center gap-1.5"><Phone size={9} className="text-[#ca0607]" /> +351 210 152 492</div>
+                <div className="flex items-center gap-1.5"><Mail size={9} className="text-[#ca0607]" /> GERAL@OPCO.PT</div>
              </div>
           </div>
         </div>
       </main>
-      
-      {/* Toast System */}
-      <div className="fixed top-4 right-4 z-[100] flex flex-col gap-2 max-w-[240px]">
+      <div className="fixed top-5 right-5 z-[100] flex flex-col gap-3 max-w-[280px]">
         {toasts.map(t => (
-          <div key={t.id} className={`px-3 py-2 rounded-lg shadow-lg border-l-2 text-[8px] font-bold uppercase tracking-widest animate-fade-in backdrop-blur-xl transition-all ${
-            t.type === 'success' ? 'bg-emerald-500/10 border-emerald-600 text-emerald-700' :
-            t.type === 'error' ? 'bg-rose-500/10 border-rose-600 text-rose-700' :
-            'bg-slate-500/10 border-slate-600 text-slate-700'
-          }`}>
-            <div className="flex items-center gap-1.5">
-              {t.type === 'success' ? <Check size={12}/> : <Activity size={12}/>}
-              {t.message}
-            </div>
+          <div key={t.id} className={`px-4 py-3 rounded-xl shadow-2xl border-l-4 text-[9px] font-bold uppercase tracking-widest animate-fade-in backdrop-blur-xl transition-all ${t.type === 'success' ? 'bg-emerald-500/10 border-emerald-600 text-emerald-700' : t.type === 'error' ? 'bg-rose-500/10 border-rose-600 text-rose-700' : 'bg-slate-500/10 border-slate-600 text-slate-700'}`}>
+            <div className="flex items-center gap-2">{t.type === 'success' ? <Check size={14}/> : <Activity size={14}/>}{t.message}</div>
           </div>
         ))}
       </div>
-      
-      {isSidebarOpen && <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm z-[45] md:hidden transition-all duration-500" onClick={() => setIsSidebarOpen(false)} />}
+      {isSidebarOpen && <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-sm z-[45] md:hidden transition-all duration-500" onClick={() => setIsSidebarOpen(false)} />}
     </div>
   );
 };
